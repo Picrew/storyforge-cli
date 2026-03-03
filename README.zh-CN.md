@@ -4,7 +4,7 @@
 
 ![preview badge](https://img.shields.io/badge/preview-v0.1.0-f97316)
 ![node badge](https://img.shields.io/badge/node-%3E%3D20.0.0-16a34a)
-![license badge](https://img.shields.io/badge/license-pending-6b7280)
+![license badge](https://img.shields.io/badge/license-Apache%202.0-2563eb)
 
 一个面向场景、情节弧线与长篇虚构创作的写作者优先终端界面。
 
@@ -78,12 +78,22 @@ storyforge
 
 如果链接后仍然找不到 `storyforge` 命令，先执行一次 `pnpm setup`，然后重启当前 shell，让 pnpm 的全局 bin 目录进入 `PATH`。
 
+## 文档
+
+- [文档索引](./docs/README.md)
+- [Quickstart](./docs/quickstart.md)
+- [Feature Overview](./docs/feature-overview.md)
+- [Command Reference](./docs/command-reference.md)
+- [Provider And Model Setup](./docs/provider-and-model-setup.md)
+- [Troubleshooting](./docs/troubleshooting.md)
+
 ## 项目结构
 
 ```text
 .
 ├── docs/
-│   └── assets/    # README 图片与文档资源
+│   ├── assets/    # README 图片与文档资源
+│   └── *.md       # 当前预览版的使用文档
 ├── packages/
 │   └── cli/       # Storyforge 可执行 CLI 包
 ├── test/          # 根目录渲染测试与 smoke test
@@ -142,6 +152,6 @@ pnpm test
 
 ## 许可证
 
-当前仓库还没有加入许可证文件。
+当前仓库使用 [Apache License 2.0](./LICENSE)。
 
-在正式加入许可证之前，请将该仓库视为“源码可见，但尚未授权复用”。
+版权所有 2026 Jayden

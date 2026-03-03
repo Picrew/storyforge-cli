@@ -4,7 +4,7 @@
 
 ![preview badge](https://img.shields.io/badge/preview-v0.1.0-f97316)
 ![node badge](https://img.shields.io/badge/node-%3E%3D20.0.0-16a34a)
-![license badge](https://img.shields.io/badge/license-pending-6b7280)
+![license badge](https://img.shields.io/badge/license-Apache%202.0-2563eb)
 
 Writer-first terminal UI for scenes, arcs, and long-form fiction.
 
@@ -78,12 +78,22 @@ storyforge
 
 If `storyforge` is still not found after linking, run `pnpm setup` once and restart your shell so pnpm's global bin directory is added to your `PATH`.
 
+## Documentation
+
+- [Documentation Index](./docs/README.md)
+- [Quickstart](./docs/quickstart.md)
+- [Feature Overview](./docs/feature-overview.md)
+- [Command Reference](./docs/command-reference.md)
+- [Provider And Model Setup](./docs/provider-and-model-setup.md)
+- [Troubleshooting](./docs/troubleshooting.md)
+
 ## Project Layout
 
 ```text
 .
 ├── docs/
-│   └── assets/    # README images and supporting documentation assets
+│   ├── assets/    # README images and supporting documentation assets
+│   └── *.md       # User documentation for the preview shell
 ├── packages/
 │   └── cli/       # Executable Storyforge CLI package
 ├── test/          # Root-level rendering and smoke tests
@@ -142,6 +152,6 @@ If you extend it, keep the current bar:
 
 ## License
 
-No license file has been added yet.
+Storyforge is available under the [Apache License 2.0](./LICENSE).
 
-Until a license is explicitly added, treat this repository as source-visible but not licensed for reuse.
+Copyright 2026 Jayden

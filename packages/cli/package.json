@@ -2,6 +2,7 @@
   "name": "@storyforge/cli",
   "version": "0.1.0",
   "description": "Storyforge CLI",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

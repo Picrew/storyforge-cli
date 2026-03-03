@@ -33,6 +33,7 @@ export function ProviderDialog({
   searchValue
 }: ProviderDialogProps): React.JSX.Element {
   const valueWidth = Math.max(18, width - 12);
+  const visibleProviders = providers.slice(0, 8);
   let previousGroup: ProviderOption["group"] | null = null;
 
   return (
@@ -55,7 +56,10 @@ export function ProviderDialog({
         <Text color={themeTokens.accent}>{searchValue || "_"}</Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
-        {providers.slice(0, 8).map((provider, index) => {
+        {visibleProviders.length === 0 ? (
+          <Text color={themeTokens.textSecondary}>  No matching providers.</Text>
+        ) : null}
+        {visibleProviders.map((provider, index) => {
           const isSelected = index === Math.min(selectedIndex, providers.length - 1);
           const showGroupHeader = provider.group !== previousGroup;
           previousGroup = provider.group;

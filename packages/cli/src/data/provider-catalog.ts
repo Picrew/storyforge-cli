@@ -170,6 +170,14 @@ function scoreMatch(query: string, value: string): number {
   return 0;
 }
 
+function getProviderMatchScore(query: string, provider: ProviderOption): number {
+  return Math.max(
+    scoreMatch(query, provider.id),
+    scoreMatch(query, provider.title),
+    scoreMatch(query, provider.subtitle)
+  );
+}
+
 export function getProviderCatalog(): readonly ProviderOption[] {
   return providerCatalog;
 }
@@ -181,28 +189,24 @@ export function getProviderOption(providerId: string): ProviderOption | null {
 export function getProviderMatches(searchValue: string): readonly ProviderOption[] {
   const normalizedSearch = searchValue.trim().toLowerCase();
 
-  return [...providerCatalog].sort((left, right) => {
-    const leftScore = Math.max(
-      scoreMatch(normalizedSearch, left.id),
-      scoreMatch(normalizedSearch, left.title),
-      scoreMatch(normalizedSearch, left.subtitle)
-    );
-    const rightScore = Math.max(
-      scoreMatch(normalizedSearch, right.id),
-      scoreMatch(normalizedSearch, right.title),
-      scoreMatch(normalizedSearch, right.subtitle)
-    );
+  return providerCatalog
+    .map((provider) => ({
+      provider,
+      score: getProviderMatchScore(normalizedSearch, provider)
+    }))
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => {
+      if (left.score !== right.score) {
+        return right.score - left.score;
+      }
 
-    if (leftScore !== rightScore) {
-      return rightScore - leftScore;
-    }
+      if (left.provider.group !== right.provider.group) {
+        return left.provider.group === "popular" ? -1 : 1;
+      }
 
-    if (left.group !== right.group) {
-      return left.group === "popular" ? -1 : 1;
-    }
-
-    return left.title.localeCompare(right.title);
-  });
+      return left.provider.title.localeCompare(right.provider.title);
+    })
+    .map(({ provider }) => provider);
 }
 
 export function getFallbackModels(providerId: string): readonly ModelOption[] {

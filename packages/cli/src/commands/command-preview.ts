@@ -42,6 +42,10 @@ function getPreviewCandidates(item: CommandPreviewItem): readonly string[] {
   return item.aliases ? [item.command, ...item.aliases] : [item.command];
 }
 
+function getCommandMatchScore(query: string, item: CommandPreviewItem): number {
+  return Math.max(...getPreviewCandidates(item).map((candidate) => scoreMatch(query, candidate)));
+}
+
 function scoreMatch(query: string, candidate: string): number {
   if (!query || query === "/") {
     return 1;
@@ -70,7 +74,13 @@ function scoreMatch(query: string, candidate: string): number {
 }
 
 export function shouldShowCommandPreview(inputValue: string): boolean {
-  return getCommandToken(inputValue) !== null;
+  const token = getCommandToken(inputValue);
+
+  if (!token) {
+    return false;
+  }
+
+  return commandPreviewItems.some((item) => getCommandMatchScore(token, item) > 0);
 }
 
 export function getCommandPreviewItems(inputValue: string): readonly CommandPreviewItem[] {
@@ -80,18 +90,20 @@ export function getCommandPreviewItems(inputValue: string): readonly CommandPrev
     return [];
   }
 
-  return [...commandPreviewItems].sort((left, right) => {
-    const leftScore = Math.max(...getPreviewCandidates(left).map((candidate) => scoreMatch(token, candidate)));
-    const rightScore = Math.max(
-      ...getPreviewCandidates(right).map((candidate) => scoreMatch(token, candidate))
-    );
+  return commandPreviewItems
+    .map((item) => ({
+      item,
+      score: getCommandMatchScore(token, item)
+    }))
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => {
+      if (left.score !== right.score) {
+        return right.score - left.score;
+      }
 
-    if (leftScore !== rightScore) {
-      return rightScore - leftScore;
-    }
-
-    return 0;
-  });
+      return 0;
+    })
+    .map(({ item }) => item);
 }
 
 export function getCommandAutocompleteValue(

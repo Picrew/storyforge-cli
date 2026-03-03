@@ -659,6 +659,7 @@ export function App({
   };
 
   const executePaletteAction = (currentState: AppState, now: number): { nextState: AppState; shouldExit: boolean } => {
+    const paletteState = clearInputValue(currentState);
     const selectedItem = getSelectedCommandPreviewItem(
       currentState.inputValue,
       currentState.commandSelectionIndex
@@ -673,20 +674,20 @@ export function App({
 
     if (selectedItem.action === "connect") {
       return {
-        nextState: openConnectProviderModal(currentState),
+        nextState: openConnectProviderModal(paletteState),
         shouldExit: false
       };
     }
 
     if (selectedItem.action === "models") {
       return {
-        nextState: openModelPickerForCurrentConnection(currentState, now),
+        nextState: openModelPickerForCurrentConnection(paletteState, now),
         shouldExit: false
       };
     }
 
     return {
-      nextState: currentState,
+      nextState: paletteState,
       shouldExit: true
     };
   };
