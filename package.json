@@ -1,0 +1,30 @@
+{
+  "name": "storyforge-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.10.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.3.3",
+    "@types/react": "^19.2.14",
+    "eslint": "^10.0.2",
+    "globals": "^17.4.0",
+    "ink": "^6.8.0",
+    "ink-testing-library": "^4.0.0",
+    "react": "^19.2.4",
+    "typescript-eslint": "^8.56.1",
+    "vitest": "^4.0.18"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @storyforge/cli run dev",
+    "build": "pnpm --filter @storyforge/cli run build",
+    "lint": "pnpm --filter @storyforge/cli run lint",
+    "link:global": "pnpm --dir packages/cli link --global",
+    "unlink:global": "pnpm --dir packages/cli unlink --global",
+    "typecheck": "pnpm --filter @storyforge/cli run typecheck",
+    "test": "pnpm --filter @storyforge/cli run test"
+  }
+}
