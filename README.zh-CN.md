@@ -8,9 +8,9 @@
 
 一个面向场景、情节弧线与长篇虚构创作的写作者优先终端界面。
 
-Storyforge 是一个面向小说工作流的开源 CLI 界面。当前仓库只提供第一阶段的交互外壳：包括启动首屏、品牌化输入区，以及可响应终端宽度的整体布局，用来先建立产品的视觉和交互基调。
+Storyforge 是一个面向小说工作流的开源 CLI 界面。当前仓库提供第一阶段的交互外壳：包括启动首屏、品牌化输入区、响应式终端布局，以及一个最小可用的模型配置流程。
 
-> 当前版本是 UI 预览构建，目前只实现了界面外壳。
+> 当前版本仍然是预览构建。故事创作流程还没实现，但已经可以用 `/connect` 和 `/models` 做基础 provider 配置。
 
 ![Storyforge 预览界面](./docs/assets/storyforge-preview-shell.jpg)
 
@@ -24,10 +24,15 @@ Storyforge 是一个面向小说工作流的开源 CLI 界面。当前仓库只�
 
 - 支持多种终端宽度的响应式 ASCII Storyforge 头部。
 - 用于建立氛围和定位的欢迎卡片。
-- 可交互的输入框，支持输入、`Backspace` 删除、`Enter` 提交和 `Ctrl+C` 退出。
+- 可交互的输入框，支持输入、`Backspace` 删除、`Enter` 提交，以及 `Esc` 或 `Ctrl+C` 退出。
+- 输入 `/` 时会出现顶部命令面板，支持 `Tab` 自动补全和 `Enter` 选中。
+- `/connect` 会先打开 provider 选择器，再进入凭据填写。
+- `/models` 会打开模型选择器；本机装了 `opencode` 时，会优先读取 `opencode models <provider>` 的结果。
+- 也支持直接手输 `/connect <provider> <api-key> [base-url]` 和 `/model <provider/model>`。
+- 再次打开时会自动恢复上一次保存的 provider 和 model。
 - 能适配宽窄终端的底部状态栏。
 
-按下 `Enter` 后，Storyforge 会清空输入，并显示当前预览提示：
+在普通故事输入上按下 `Enter` 后，Storyforge 会清空输入，并显示当前预览提示：
 
 ```text
 UI preview only. Story actions are not implemented yet.

@@ -1,30 +1,176 @@
 import React from "react";
 import { Box, Text } from "ink";
+import {
+  getCommandPreviewItems,
+  shouldShowCommandPreview
+} from "../commands/command-preview.js";
+import { CommandPreview } from "../components/CommandPreview.js";
+import { ConnectAuthModeDialog } from "../components/ConnectAuthModeDialog.js";
+import { ConnectCredentialsDialog } from "../components/ConnectCredentialsDialog.js";
+import { ConnectOauthDialog } from "../components/ConnectOauthDialog.js";
+import { ModelDialog } from "../components/ModelDialog.js";
+import { ProviderDialog } from "../components/ProviderDialog.js";
+import { getProviderMatches, getProviderOption } from "../data/provider-catalog.js";
 import { getContentWidth, shouldCondenseWelcome } from "../layout/viewport.js";
 import { themeTokens } from "../theme/tokens.js";
 import type { AppState } from "../types.js";
 import { Footer } from "../components/Footer.js";
 import { Header } from "../components/Header.js";
 import { InputFrame } from "../components/InputFrame.js";
+import { ResponsePanel } from "../components/ResponsePanel.js";
+import { SessionStatus } from "../components/SessionStatus.js";
 import { WelcomeCard } from "../components/WelcomeCard.js";
+import {
+  getSystemOpencodeAuthPath,
+  hasOauthCredential
+} from "../utils/opencode-auth.js";
 
 interface AppShellProps {
   state: AppState;
   terminalWidth: number;
+  terminalHeight?: number;
   cwd: string;
 }
 
-export function AppShell({ state, terminalWidth, cwd }: AppShellProps): React.JSX.Element {
+export function AppShell({
+  state,
+  terminalWidth,
+  terminalHeight = 30,
+  cwd
+}: AppShellProps): React.JSX.Element {
   const contentWidth = getContentWidth(terminalWidth);
   const condensedWelcome = shouldCondenseWelcome(contentWidth);
+  const showCommandPreview = shouldShowCommandPreview(state.inputValue);
+  const commandPreviewItems = showCommandPreview ? getCommandPreviewItems(state.inputValue) : [];
+  const overlayWidth = Math.max(32, Math.min(Math.max(terminalWidth - 4, 32), contentWidth));
+  const providerModal = state.modal?.kind === "connect-provider" ? state.modal : null;
+  const authModeModal = state.modal?.kind === "connect-auth-mode" ? state.modal : null;
+  const oauthModal = state.modal?.kind === "connect-oauth" ? state.modal : null;
+  const modelModal = state.modal?.kind === "model-picker" ? state.modal : null;
+  const providerMatches = providerModal ? getProviderMatches(providerModal.searchValue) : [];
+  const authModeProvider = authModeModal ? getProviderOption(authModeModal.providerId) : null;
+  const oauthProvider = oauthModal ? getProviderOption(oauthModal.providerId) : null;
+  let filteredModelIds: readonly string[] = [];
+
+  if (modelModal) {
+    filteredModelIds = modelModal.modelIds.filter((modelId) =>
+      modelId.toLowerCase().includes(modelModal.searchValue.trim().toLowerCase())
+    );
+  }
+
+  const transcriptTurns =
+    state.transcript.length > 0
+      ? state.transcript
+      : state.latestExchange
+        ? [{ id: "latest", ...state.latestExchange }]
+        : [];
+  const hasTranscript = transcriptTurns.length > 0;
+  const transcriptVisibleLines = Math.max(
+    8,
+    Math.min(
+      22,
+      terminalHeight -
+        (hasTranscript ? 10 : condensedWelcome ? 18 : 22) -
+        (state.transientNotice ? 2 : 0)
+    )
+  );
+
+  if (state.modal) {
+    return (
+      <Box width="100%" flexDirection="column" alignItems="center" paddingY={1}>
+        <Box width={overlayWidth}>
+          {state.modal.kind === "connect-provider" ? (
+            <ProviderDialog
+              width={overlayWidth}
+              providers={providerMatches}
+              selectedIndex={state.modal.selectedIndex}
+              searchValue={state.modal.searchValue}
+            />
+          ) : null}
+          {state.modal.kind === "connect-credentials" ? (
+            <ConnectCredentialsDialog
+              width={overlayWidth}
+              providerId={state.modal.providerId}
+              fieldLabel={state.modal.fieldLabel}
+              helperText={state.modal.helperText}
+              apiKeyValue={state.modal.apiKeyValue}
+            />
+          ) : null}
+          {state.modal.kind === "connect-auth-mode" && authModeProvider ? (
+            <ConnectAuthModeDialog
+              width={overlayWidth}
+              providerTitle={authModeProvider.title}
+              selectedIndex={state.modal.selectedIndex}
+            />
+          ) : null}
+          {state.modal.kind === "connect-oauth" && oauthProvider ? (
+            <ConnectOauthDialog
+              width={overlayWidth}
+              providerId={oauthProvider.id}
+              providerTitle={oauthProvider.title}
+              helperText={oauthProvider.credentialHelperText}
+              hasSavedCredential={
+                state.config.connection?.provider === oauthProvider.id &&
+                state.config.connection.authMode === "oauth" &&
+                Boolean(state.config.connection.apiKey)
+              }
+              canImportCredential={hasOauthCredential(
+                oauthProvider.id,
+                getSystemOpencodeAuthPath()
+              )}
+              flowMode={state.modal.flowMode}
+              flowPhase={state.modal.flowPhase}
+              authUrl={state.modal.authUrl}
+              userCode={state.modal.userCode}
+              statusMessage={state.modal.statusMessage}
+              errorMessage={state.modal.errorMessage}
+            />
+          ) : null}
+          {state.modal.kind === "model-picker" ? (
+            <ModelDialog
+              width={overlayWidth}
+              providerId={state.modal.providerId}
+              modelIds={filteredModelIds}
+              selectedIndex={state.modal.selectedIndex}
+              searchValue={state.modal.searchValue}
+            />
+          ) : null}
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box width="100%" flexDirection="column" alignItems="center" paddingY={1}>
+      {showCommandPreview ? (
+        <Box width={overlayWidth} marginBottom={1}>
+          <CommandPreview
+            width={overlayWidth}
+            items={commandPreviewItems}
+            selectedIndex={state.commandSelectionIndex}
+          />
+        </Box>
+      ) : null}
       <Box width={contentWidth} flexDirection="column">
         <Header mode={state.viewportMode} />
+        {!hasTranscript ? (
+          <Box marginTop={1}>
+            <WelcomeCard width={contentWidth} condensed={condensedWelcome} />
+          </Box>
+        ) : null}
         <Box marginTop={1}>
-          <WelcomeCard width={contentWidth} condensed={condensedWelcome} />
+          <SessionStatus width={contentWidth} config={state.config} />
         </Box>
+        {hasTranscript ? (
+          <Box marginTop={1}>
+            <ResponsePanel
+              width={contentWidth}
+              turns={transcriptTurns}
+              scrollOffset={state.transcriptScrollOffset}
+              visibleLines={transcriptVisibleLines}
+            />
+          </Box>
+        ) : null}
         {state.transientNotice ? (
           <Box marginTop={1}>
             <Text color={themeTokens.notice}>{state.transientNotice.message}</Text>

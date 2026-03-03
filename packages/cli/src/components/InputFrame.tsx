@@ -2,42 +2,14 @@ import React from "react";
 import { Box, Text } from "ink";
 import { copy } from "../content/copy.js";
 import { themeTokens } from "../theme/tokens.js";
+import {
+  truncateEndByWidth,
+  truncateStartByWidth
+} from "../utils/display-width.js";
 
 interface InputFrameProps {
   width: number;
   value: string;
-}
-
-function truncateStart(value: string, maxLength: number): string {
-  if (maxLength <= 0) {
-    return "";
-  }
-
-  if (value.length <= maxLength) {
-    return value;
-  }
-
-  if (maxLength <= 3) {
-    return value.slice(value.length - maxLength);
-  }
-
-  return `...${value.slice(value.length - (maxLength - 3))}`;
-}
-
-function truncateEnd(value: string, maxLength: number): string {
-  if (maxLength <= 0) {
-    return "";
-  }
-
-  if (value.length <= maxLength) {
-    return value;
-  }
-
-  if (maxLength <= 3) {
-    return value.slice(0, maxLength);
-  }
-
-  return `${value.slice(0, maxLength - 3)}...`;
 }
 
 export function InputFrame({ width, value }: InputFrameProps): React.JSX.Element {
@@ -47,8 +19,8 @@ export function InputFrame({ width, value }: InputFrameProps): React.JSX.Element
   const divider = "-".repeat(Math.max(8, innerWidth));
   const contentWidth = Math.max(6, innerWidth - prompt.length - 1);
   const displayValue = value
-    ? truncateStart(value, contentWidth - 1)
-    : truncateEnd(copy.placeholder, contentWidth);
+    ? truncateStartByWidth(value, contentWidth - 1)
+    : truncateEndByWidth(copy.placeholder, contentWidth);
 
   return (
     <Box
@@ -60,7 +32,9 @@ export function InputFrame({ width, value }: InputFrameProps): React.JSX.Element
     >
       <Box justifyContent={showHint ? "space-between" : "flex-start"}>
         <Text color={themeTokens.accentSecondary}>PROMPT LANE</Text>
-        {showHint ? <Text color={themeTokens.textSecondary}>Enter submits / Ctrl+C exits</Text> : null}
+        {showHint ? (
+          <Text color={themeTokens.textSecondary}>↑↓ scroll / / commands / Enter sends / Esc exits</Text>
+        ) : null}
       </Box>
       <Text color={themeTokens.border}>{divider}</Text>
       <Box>

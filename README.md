@@ -8,9 +8,9 @@
 
 Writer-first terminal UI for scenes, arcs, and long-form fiction.
 
-Storyforge is an open-source CLI interface for novel workflows. The repository currently ships the first interactive shell only: a polished startup screen, a branded input lane, and a responsive terminal layout that define the product's visual direction.
+Storyforge is an open-source CLI interface for novel workflows. The repository currently ships a first interactive shell: a polished startup screen, a branded input lane, responsive terminal layout, and a minimal persisted model setup flow.
 
-> This is a UI preview build. Only the interface shell is implemented right now.
+> This is still a preview build. Story drafting is not implemented yet, but `/connect` and `/models` are available for basic provider setup.
 
 ![Storyforge preview shell](./docs/assets/storyforge-preview-shell.jpg)
 
@@ -24,10 +24,15 @@ Storyforge is an open-source CLI interface for novel workflows. The repository c
 
 - A responsive ASCII Storyforge header with multiple viewport modes.
 - A branded welcome card that frames the current session.
-- An interactive input frame with typing, backspace, `Enter` submit, and `Ctrl+C` exit.
+- An interactive input frame with typing, backspace, `Enter` submit, and `Esc` or `Ctrl+C` exit.
+- A top command palette when you start typing `/`, with `Tab` autocomplete and `Enter` selection.
+- A `/connect` provider picker that leads into saved credential entry.
+- A `/models` model picker that uses the local `opencode models <provider>` list when available.
+- Manual command support for `/connect <provider> <api-key> [base-url]` and `/model <provider/model>`.
+- Automatic restore of the last saved provider and model on the next launch.
 - An adaptive footer for wide and narrow terminals.
 
-If you press `Enter`, Storyforge clears the prompt and shows the current preview notice:
+If you press `Enter` on a normal story prompt, Storyforge clears the prompt and shows the current preview notice:
 
 ```text
 UI preview only. Story actions are not implemented yet.
