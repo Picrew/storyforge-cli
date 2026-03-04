@@ -1,6 +1,6 @@
 # Storyforge Documentation
 
-This folder is the documentation hub for the current Storyforge preview build.
+This folder is the documentation hub for the current Storyforge build.
 
 The structure is intentionally lightweight, similar to CLI-first projects that keep a simple index plus focused topic guides.
 
@@ -22,19 +22,25 @@ The structure is intentionally lightweight, similar to CLI-first projects that k
 
 ## Current Scope
 
-Storyforge is still a preview shell for novel workflows.
+Storyforge is still early, but it now includes a real story bootstrap flow.
 
 What is implemented now:
 
 - interactive terminal UI with responsive layouts
 - provider connection and saved credentials
 - model switching and persistence
+- per-directory story project library persistence
+- multiple local story projects per working directory
+- `/init` story bootstrap from a natural-language brief
+- `/projects` listing and project switching inside the current working directory
+- structured story tables for world, characters, timeline, and outline
+- command-driven editing for story tables
 - live transcript streaming through local `opencode`
 - keyboard-first command entry and modal flows
 
 What is not implemented yet:
 
-- story outlining workflows
-- chapter drafting tools
+- chapter drafting from the generated outline
 - scene management
-- project-level writing assets
+- export flows
+- cross-directory project management

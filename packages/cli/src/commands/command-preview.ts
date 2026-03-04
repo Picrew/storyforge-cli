@@ -1,7 +1,16 @@
 export interface CommandPreviewItem {
   command: string;
   description: string;
-  action: "connect" | "models" | "exit";
+  action:
+    | "connect"
+    | "models"
+    | "init"
+    | "projects"
+    | "world"
+    | "characters"
+    | "timeline"
+    | "outline"
+    | "exit";
   aliases?: readonly string[];
 }
 
@@ -16,6 +25,37 @@ const commandPreviewItems: readonly CommandPreviewItem[] = [
     description: "Switch model",
     action: "models",
     aliases: ["/model"]
+  },
+  {
+    command: "/init",
+    description: "Create or refresh a story project",
+    action: "init"
+  },
+  {
+    command: "/projects",
+    description: "List or open saved story projects",
+    action: "projects",
+    aliases: ["/project"]
+  },
+  {
+    command: "/world",
+    description: "Show or edit world state",
+    action: "world"
+  },
+  {
+    command: "/char",
+    description: "Show or edit characters",
+    action: "characters"
+  },
+  {
+    command: "/timeline",
+    description: "Show or edit timeline beats",
+    action: "timeline"
+  },
+  {
+    command: "/outline",
+    description: "Show or edit chapter plan",
+    action: "outline"
   },
   {
     command: "/exit",

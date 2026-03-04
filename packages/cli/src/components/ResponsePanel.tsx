@@ -36,6 +36,29 @@ function pushWrappedLines(
   });
 }
 
+function pushPreformattedLines(
+  lines: TranscriptLine[],
+  keyPrefix: string,
+  value: string,
+  color: string,
+  width: number
+): void {
+  const availableWidth = Math.max(1, width - 3);
+  const rows = value ? value.split("\n") : [" "];
+
+  rows.forEach((row, rowIndex) => {
+    const wrapped = wrapTextByWidth(row || " ", availableWidth);
+
+    wrapped.forEach((line, lineIndex) => {
+      lines.push({
+        key: `${keyPrefix}-pre-${rowIndex}-${lineIndex}`,
+        text: `   ${line}`,
+        color
+      });
+    });
+  });
+}
+
 function buildTranscriptLines(turns: readonly TranscriptEntry[], width: number): readonly TranscriptLine[] {
   const lines: TranscriptLine[] = [];
 
@@ -46,6 +69,32 @@ function buildTranscriptLines(turns: readonly TranscriptEntry[], width: number):
         text: "",
         color: themeTokens.textSecondary
       });
+    }
+
+    const lineColor = turn.failed ? themeTokens.notice : themeTokens.textPrimary;
+    const isLocalStoryEntry =
+      turn.provider === "storyforge" &&
+      (turn.model === "story/project" || turn.model === "story/library");
+
+    if (isLocalStoryEntry) {
+      const responseRows = (turn.response || "").split("\n");
+      const headline = responseRows[0] || "";
+      const detail = responseRows.slice(1).join("\n");
+
+      pushWrappedLines(
+        lines,
+        turn.id,
+        "Story",
+        headline ? `${turn.prompt} · ${headline}` : turn.prompt,
+        lineColor,
+        width
+      );
+
+      if (detail) {
+        pushPreformattedLines(lines, turn.id, detail, lineColor, width);
+      }
+
+      return;
     }
 
     lines.push({
@@ -59,7 +108,7 @@ function buildTranscriptLines(turns: readonly TranscriptEntry[], width: number):
       turn.id,
       turn.failed ? "Error" : "Assistant",
       turn.response || (turn.streaming ? "..." : ""),
-      turn.failed ? themeTokens.notice : themeTokens.textPrimary,
+      lineColor,
       width
     );
   });
