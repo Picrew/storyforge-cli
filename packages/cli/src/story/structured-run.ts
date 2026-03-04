@@ -2,13 +2,11 @@ import { spawn } from "node:child_process";
 import type { Readable } from "node:stream";
 import { getStoryforgeOpencodeDataDir } from "../utils/opencode-auth.js";
 import { normalizeAssistantText } from "../utils/opencode-run.js";
-
-interface OpencodeJsonEvent {
-  type?: string;
-  part?: {
-    text?: string;
-  };
-}
+import {
+  getOpencodeEventErrorMessage,
+  getOpencodeEventText,
+  parseOpencodeEvent
+} from "../utils/opencode-events.js";
 
 export interface StructuredRunOptions {
   cwd: string;
@@ -18,14 +16,6 @@ export interface StructuredRunOptions {
 }
 
 export type StructuredRunner = (options: StructuredRunOptions) => Promise<string>;
-
-function parseEvent(line: string): OpencodeJsonEvent | null {
-  try {
-    return JSON.parse(line) as OpencodeJsonEvent;
-  } catch {
-    return null;
-  }
-}
 
 export const runStructuredPrompt: StructuredRunner = async ({
   cwd,
@@ -44,6 +34,7 @@ export const runStructuredPrompt: StructuredRunner = async ({
     let stdoutBuffer = "";
     let stderrBuffer = "";
     let result = "";
+    let eventErrorMessage: string | null = null;
 
     (child.stdout as Readable).on("data", (chunk) => {
       stdoutBuffer += chunk.toString();
@@ -51,10 +42,19 @@ export const runStructuredPrompt: StructuredRunner = async ({
       stdoutBuffer = lines.pop() ?? "";
 
       for (const rawLine of lines) {
-        const event = parseEvent(rawLine.trim());
+        const event = parseOpencodeEvent(rawLine.trim());
 
-        if (event?.type === "text" && typeof event.part?.text === "string") {
-          result += event.part.text;
+        const errorMessage = getOpencodeEventErrorMessage(event);
+
+        if (errorMessage) {
+          eventErrorMessage = errorMessage;
+          continue;
+        }
+
+        const text = getOpencodeEventText(event);
+
+        if (text) {
+          result += text;
         }
       }
     });
@@ -71,11 +71,24 @@ export const runStructuredPrompt: StructuredRunner = async ({
       const finalLine = stdoutBuffer.trim();
 
       if (finalLine) {
-        const event = parseEvent(finalLine);
+        const event = parseOpencodeEvent(finalLine);
 
-        if (event?.type === "text" && typeof event.part?.text === "string") {
-          result += event.part.text;
+        const errorMessage = getOpencodeEventErrorMessage(event);
+
+        if (errorMessage) {
+          eventErrorMessage = errorMessage;
         }
+
+        const text = getOpencodeEventText(event);
+
+        if (text) {
+          result += text;
+        }
+      }
+
+      if (eventErrorMessage) {
+        reject(new Error(eventErrorMessage));
+        return;
       }
 
       if (code !== 0) {

@@ -363,6 +363,59 @@ describe("story init flow", () => {
     app.unmount();
   });
 
+  it("marks the project as bootstrapping while init generation is in progress", async () => {
+    const cwd = makeTempDir();
+    const { runner: baseRunner } = createStructuredRunner();
+    const stages: string[] = [];
+    let releaseFoundation = () => {};
+    const foundationGate = new Promise<void>((resolve) => {
+      releaseFoundation = resolve;
+    });
+    const runner: StructuredRunner = async (options) => {
+      stages.push(options.stage);
+
+      if (options.stage === "foundation") {
+        await foundationGate;
+      }
+
+      return baseRunner(options);
+    };
+    const app = render(
+      <App
+        terminalWidthOverride={100}
+        cwdOverride={cwd}
+        structuredRunnerOverride={runner}
+        initialConfigOverride={{
+          connection: {
+            provider: "deepseek",
+            authMode: "oauth",
+            apiKey: null,
+            baseUrl: null,
+            authLabel: "Test auth"
+          },
+          model: "deepseek/deepseek-chat"
+        }}
+      />
+    );
+
+    await submitInput(app, "/init");
+    await waitForCondition(() => (app.lastFrame() ?? "").includes("status awaiting_brief"));
+
+    await submitInput(app, "Write a warm conference comedy.");
+    await waitForCondition(
+      () =>
+        stages.includes("foundation") &&
+        loadStoryProject(cwd)?.meta.status === "bootstrapping" &&
+        (app.lastFrame() ?? "").includes("status bootstrapping")
+    );
+
+    releaseFoundation();
+    await waitForCondition(() => loadStoryProject(cwd)?.meta.status === "ready");
+
+    expect(loadStoryProject(cwd)?.meta.status).toBe("ready");
+    app.unmount();
+  });
+
   it("keeps completed sections when a later bootstrap stage fails", async () => {
     const cwd = makeTempDir();
     const { runner } = createStructuredRunner({ failStage: "outline" });

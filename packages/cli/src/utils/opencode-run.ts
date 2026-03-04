@@ -1,14 +1,11 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 import { getStoryforgeOpencodeDataDir } from "./opencode-auth.js";
-
-interface OpencodeJsonEvent {
-  type?: string;
-  sessionID?: string;
-  part?: {
-    text?: string;
-  };
-}
+import {
+  getOpencodeEventErrorMessage,
+  getOpencodeEventText,
+  parseOpencodeEvent
+} from "./opencode-events.js";
 
 export interface OpencodeStreamCallbacks {
   onSessionId?: (sessionId: string) => void;
@@ -22,14 +19,6 @@ export interface StartOpencodeStreamOptions extends OpencodeStreamCallbacks {
   model: string;
   prompt: string;
   sessionId?: string | null;
-}
-
-function parseEvent(line: string): OpencodeJsonEvent | null {
-  try {
-    return JSON.parse(line) as OpencodeJsonEvent;
-  } catch {
-    return null;
-  }
 }
 
 export function normalizeAssistantText(value: string): string {
@@ -69,6 +58,7 @@ export function startOpencodeStream({
   });
   let stdoutBuffer = "";
   let stderrBuffer = "";
+  let eventErrorMessage: string | null = null;
 
   child.stdout.on("data", (chunk) => {
     stdoutBuffer += chunk.toString();
@@ -82,7 +72,7 @@ export function startOpencodeStream({
         continue;
       }
 
-      const event = parseEvent(line);
+      const event = parseOpencodeEvent(line);
 
       if (!event) {
         continue;
@@ -92,8 +82,17 @@ export function startOpencodeStream({
         onSessionId?.(event.sessionID);
       }
 
-      if (event.type === "text" && typeof event.part?.text === "string") {
-        onText?.(event.part.text);
+      const errorMessage = getOpencodeEventErrorMessage(event);
+
+      if (errorMessage) {
+        eventErrorMessage = errorMessage;
+        continue;
+      }
+
+      const text = getOpencodeEventText(event);
+
+      if (text) {
+        onText?.(text);
       }
     }
   });
@@ -110,17 +109,30 @@ export function startOpencodeStream({
     const finalLine = stdoutBuffer.trim();
 
     if (finalLine) {
-      const event = parseEvent(finalLine);
+      const event = parseOpencodeEvent(finalLine);
 
       if (event) {
         if (typeof event.sessionID === "string") {
           onSessionId?.(event.sessionID);
         }
 
-        if (event.type === "text" && typeof event.part?.text === "string") {
-          onText?.(event.part.text);
+        const errorMessage = getOpencodeEventErrorMessage(event);
+
+        if (errorMessage) {
+          eventErrorMessage = errorMessage;
+        }
+
+        const text = getOpencodeEventText(event);
+
+        if (text) {
+          onText?.(text);
         }
       }
+    }
+
+    if (eventErrorMessage) {
+      onError?.(eventErrorMessage);
+      return;
     }
 
     if (code !== 0) {
