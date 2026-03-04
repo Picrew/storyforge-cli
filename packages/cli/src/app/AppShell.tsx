@@ -143,15 +143,6 @@ export function AppShell({
 
   return (
     <Box width="100%" flexDirection="column" alignItems="center" paddingY={1}>
-      {showCommandPreview ? (
-        <Box width={overlayWidth} marginBottom={1}>
-          <CommandPreview
-            width={overlayWidth}
-            items={commandPreviewItems}
-            selectedIndex={state.commandSelectionIndex}
-          />
-        </Box>
-      ) : null}
       <Box width={contentWidth} flexDirection="column">
         <Header mode={state.viewportMode} />
         {showWelcome ? (
@@ -180,6 +171,15 @@ export function AppShell({
         <Box marginTop={1}>
           <InputFrame width={contentWidth} value={state.inputValue} />
         </Box>
+        {showCommandPreview ? (
+          <Box marginTop={1}>
+            <CommandPreview
+              width={contentWidth}
+              items={commandPreviewItems}
+              selectedIndex={state.commandSelectionIndex}
+            />
+          </Box>
+        ) : null}
         <Box marginTop={1}>
           <Footer cwd={cwd} width={contentWidth} />
         </Box>

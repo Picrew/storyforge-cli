@@ -165,6 +165,25 @@ describe("Input frame interactions", () => {
     app.unmount();
   });
 
+  it("renders the command preview below the prompt lane", () => {
+    const app = render(
+      <AppShell
+        state={{
+          ...createInitialAppState(100),
+          inputValue: "/co"
+        }}
+        terminalWidth={100}
+        cwd="/tmp/storyforge"
+      />
+    );
+
+    const frame = app.lastFrame() ?? "";
+
+    expect(frame.indexOf("PROMPT LANE")).toBeGreaterThan(-1);
+    expect(frame.indexOf("tab autocomplete")).toBeGreaterThan(frame.indexOf("PROMPT LANE"));
+    app.unmount();
+  });
+
   it("matches /models in the preview and autocompletes to /models", () => {
     expect(getCommandPreviewItems("/mod")[0]).toEqual({
       command: "/models",
