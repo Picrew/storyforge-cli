@@ -4,6 +4,44 @@ Storyforge is keyboard-first. Commands are entered directly in the prompt lane.
 
 ## Slash Commands
 
+## `/init`
+
+Create a new story project or refresh the current one.
+
+Examples:
+
+```text
+/init
+/init reset
+/init refresh
+/init refresh world
+```
+
+Behavior:
+
+- `/init` creates a new blank project in the local story library and makes it active
+- `/init reset` resets only the active project to a fresh blank scaffold
+- `/init refresh` reruns all generated story tables from the saved brief
+- `/init refresh world|char|timeline|outline` reruns only one section
+- after `/init`, the next normal prompt is consumed as the story brief
+
+## `/projects`
+
+List local story projects or reopen a saved one.
+
+Examples:
+
+```text
+/projects
+/projects open 2
+```
+
+Behavior:
+
+- `/projects` shows every saved project in the current working directory
+- rows are 1-based and mark the active project with `*`
+- `/projects open <row>` switches the active project without deleting the others
+
 ## `/connect`
 
 Open the provider flow.
@@ -39,13 +77,93 @@ Behavior:
 - `/model <provider/model>` sets the model directly
 - if no provider is connected yet, Storyforge shows a setup warning instead
 
+## `/world`
+
+View or edit world state.
+
+Examples:
+
+```text
+/world
+/world set premise A comic conference disaster
+```
+
+Behavior:
+
+- `/world` opens the world-state table
+- `/world set <field> <value...>` updates one world field and saves immediately
+
+## `/char`
+
+View or edit character rows.
+
+Examples:
+
+```text
+/char
+/char add Mira Vale
+/char set 1 role Protagonist
+/char rm 1
+```
+
+Behavior:
+
+- `/char` opens the character table
+- `/char add <name...>` appends a blank character row
+- `/char set <row> <field> <value...>` updates a character row by 1-based index
+- `/char rm <row>` removes a character row
+
+## `/timeline`
+
+View or edit timeline beats.
+
+Examples:
+
+```text
+/timeline
+/timeline add Lobby reveal
+/timeline set 1 stakes Funding is at risk
+/timeline rm 1
+```
+
+Behavior:
+
+- `/timeline` opens the timeline table
+- `/timeline add <event...>` appends a blank beat
+- `/timeline set <row> <field> <value...>` updates a beat by 1-based index
+- `/timeline rm <row>` removes a beat
+
+## `/outline`
+
+View or edit chapter plans.
+
+Examples:
+
+```text
+/outline
+/outline set 1 title Opening Pitch
+/outline rm 1
+```
+
+Behavior:
+
+- `/outline` opens the chapter-plan table
+- `/outline set <row> <field> <value...>` updates a chapter row by 1-based index
+- `/outline rm <row>` removes a chapter row
+
 ## `/exit`
 
 Exit the app.
 
 ## Prompt Submission
 
-When a provider and model are both configured:
+When the current project is in `awaiting_brief`:
+
+- the next normal prompt is used as the story brief instead of normal chat
+- Storyforge runs a staged bootstrap for `world`, `characters`, `timeline`, and `outline`
+- progress appears in the transcript panel and the story tables are saved section by section
+
+When the current project is already initialized and a provider and model are both configured:
 
 - typing normal text and pressing `Enter` sends the prompt
 - the response streams into the transcript panel

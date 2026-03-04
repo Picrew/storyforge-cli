@@ -1,9 +1,11 @@
+import path from "node:path";
 import React, { useEffect, useRef, useState } from "react";
 import { useApp, useInput, useStdout } from "ink";
 import {
   applyConnectCommand,
   applyModelCommand
 } from "../commands/command-actions.js";
+import { handleStoryCommand } from "../commands/story-commands.js";
 import {
   getCommandAutocompleteValue,
   getCommandPreviewItems,
@@ -11,7 +13,9 @@ import {
   isExitCommand,
   shouldShowCommandPreview
 } from "../commands/command-preview.js";
+import { buildStorySnapshot } from "../components/StoryPanel.js";
 import { getProviderMatches, getProviderOption } from "../data/provider-catalog.js";
+import { getContentWidth } from "../layout/viewport.js";
 import {
   appendConnectCredentialsCharacter,
   appendInputCharacter,
@@ -42,6 +46,25 @@ import {
   syncViewportMode,
   toggleConnectOauthFlowMode
 } from "../state/app-state.js";
+import {
+  createStoryProject,
+  getStoryProjectAbsolutePath,
+  getStoryProjectPath,
+  loadStoryWorkspace,
+  loadStoryProject,
+  saveStoryProject,
+  setActiveStoryProject
+} from "../story/project-store.js";
+import {
+  runStoryTask,
+  type StoryBootstrapStage,
+  type StoryTaskResult
+} from "../story/bootstrap.js";
+import {
+  runStructuredPrompt,
+  type StructuredRunner
+} from "../story/structured-run.js";
+import type { StoryLibraryEntry, StoryProject } from "../story/types.js";
 import { AppShell } from "./AppShell.js";
 import type {
   AppState,
@@ -75,6 +98,7 @@ export interface AppProps {
   cwdOverride?: string;
   configPathOverride?: string;
   initialConfigOverride?: SessionConfig;
+  structuredRunnerOverride?: StructuredRunner;
 }
 
 function getAvailableModelIds(config: SessionConfig, providerId: string): readonly string[] {
@@ -120,25 +144,53 @@ export function App({
   terminalWidthOverride,
   cwdOverride,
   configPathOverride,
-  initialConfigOverride
+  initialConfigOverride,
+  structuredRunnerOverride
 }: AppProps = {}): React.JSX.Element {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const terminalWidth = terminalWidthOverride ?? stdout?.columns ?? 80;
   const terminalHeight = stdout?.rows ?? 30;
+  const cwd = cwdOverride ?? process.cwd();
   const configPath = configPathOverride ?? getDefaultSessionConfigPath();
-  const [state, setState] = useState<AppState>(() =>
-    createInitialAppState(
+  let initialStoryProjectId: string | null = null;
+  let initialStoryProjects: readonly StoryLibraryEntry[] = [];
+  let initialStoryProject: StoryProject | null = null;
+  let initialStoryLoadError: string | null = null;
+
+  try {
+    const loadedWorkspace = loadStoryWorkspace(cwd);
+
+    initialStoryProjectId = loadedWorkspace.activeProjectId;
+    initialStoryProjects = loadedWorkspace.projects;
+    initialStoryProject = loadedWorkspace.activeProject;
+  } catch (error) {
+    initialStoryLoadError =
+      error instanceof Error
+        ? `Story project could not be loaded: ${error.message}`
+        : "Story project could not be loaded.";
+  }
+
+  const [state, setState] = useState<AppState>(() => {
+    const initialState = createInitialAppState(
       terminalWidth,
-      initialConfigOverride ?? loadSessionConfig(configPath)
-    )
-  );
+      initialConfigOverride ?? loadSessionConfig(configPath),
+      initialStoryProject,
+      initialStoryProjectId,
+      initialStoryProjects
+    );
+
+    return initialStoryLoadError
+      ? setTransientNotice(initialState, initialStoryLoadError)
+      : initialState;
+  });
   const stateRef = useRef(state);
   const streamProcessRef = useRef<ReturnType<typeof startOpencodeStream> | null>(null);
   const streamRunIdRef = useRef(0);
   const oauthSessionRef = useRef<Awaited<ReturnType<typeof startOpenAIOauthSession>> | null>(null);
   const oauthRunIdRef = useRef(0);
-  const cwd = cwdOverride ?? process.cwd();
+  const storyTaskRunIdRef = useRef(0);
+  const structuredRunner = structuredRunnerOverride ?? runStructuredPrompt;
 
   const applyStateUpdate = (updater: (currentState: AppState) => AppState): void => {
     setState((currentState) => {
@@ -195,6 +247,77 @@ export function App({
     );
   };
 
+  const persistStoryProjectState = (
+    currentState: AppState,
+    storyProject: StoryProject,
+    activeStoryView: AppState["activeStoryView"],
+    message: string,
+    now: number
+  ): AppState => {
+    const saveError = saveStoryProject(cwd, storyProject, currentState.storyProjectId);
+    const nextProjects = syncStoryProjectList(
+      currentState.storyProjects,
+      currentState.storyProjectId,
+      storyProject
+    );
+    const nextState: AppState = {
+      ...currentState,
+      storyProject,
+      storyProjects: nextProjects,
+      activeStoryView,
+      inputValue: "",
+      commandSelectionIndex: 0
+    };
+
+    if (!saveError) {
+      return setTransientNotice(nextState, message, now);
+    }
+
+    return setTransientNotice(
+      nextState,
+      `${message} Saved for this run, but story persistence failed: ${saveError}`,
+      now
+    );
+  };
+
+  const updateStoryTranscript = (
+    runId: number,
+    message: string,
+    project?: StoryProject,
+    activeView?: AppState["activeStoryView"]
+  ): void => {
+    if (storyTaskRunIdRef.current !== runId) {
+      return;
+    }
+
+    applyStateUpdate((activeState) => {
+      const response =
+        project && activeView
+          ? buildStoryTranscriptResponse(
+              project,
+              activeView,
+              message,
+              activeState.storyProjectId,
+              activeState.storyProjects
+            )
+          : message;
+      const nextState = updateLatestTranscriptEntry(activeState, (latestEntry) => ({
+        ...latestEntry,
+        response,
+        rawResponse: response,
+        streaming: false
+      }));
+
+      return {
+        ...nextState,
+        transientNotice: {
+          message,
+          expiresAt: Date.now() + 2_500
+        }
+      };
+    });
+  };
+
   const getLatestTranscriptEntry = (
     transcript: readonly TranscriptEntry[]
   ): TranscriptEntry | null => transcript[transcript.length - 1] ?? null;
@@ -208,6 +331,121 @@ export function App({
     transcript: [...currentState.transcript, entry],
     transcriptScrollOffset: 0
   });
+
+  const formatParsedCommandPrompt = (parsedCommand: { command: string; args: string[] }): string =>
+    parsedCommand.args.length > 0
+      ? `${parsedCommand.command} ${parsedCommand.args.join(" ")}`
+      : parsedCommand.command;
+
+  const getDefaultStoryView = (project: StoryProject): AppState["activeStoryView"] => {
+    if (project.outline.length > 0) {
+      return "outline";
+    }
+
+    if (project.timeline.length > 0) {
+      return "timeline";
+    }
+
+    if (project.characters.length > 0) {
+      return "characters";
+    }
+
+    return "world";
+  };
+
+  const syncStoryProjectList = (
+    projectList: readonly StoryLibraryEntry[],
+    projectId: string | null,
+    project: StoryProject
+  ): readonly StoryLibraryEntry[] => {
+    if (!projectId) {
+      return projectList;
+    }
+
+    const nextEntry = {
+      ...(projectList.find((entry) => entry.id === projectId) ?? {
+        id: projectId,
+        file: path.relative(path.join(cwd, ".storyforge"), getStoryProjectPath(cwd))
+      }),
+      title: project.meta.title,
+      status: project.meta.status,
+      createdAt: project.meta.createdAt,
+      updatedAt: project.meta.updatedAt
+    };
+
+    const nextProjects = projectList.map((entry) =>
+      entry.id === projectId ? nextEntry : entry
+    );
+
+    if (nextProjects.some((entry) => entry.id === projectId)) {
+      return nextProjects;
+    }
+
+    return [...nextProjects, nextEntry];
+  };
+
+  const getStoryProjectPathLabel = (
+    projectId: string | null,
+    projectList: readonly StoryLibraryEntry[]
+  ): string => {
+    const storyProjectPath = getStoryProjectAbsolutePath(cwd, projectId, projectList);
+    const relativeStoryPath = path.relative(cwd, storyProjectPath);
+
+    return relativeStoryPath.startsWith(".") ? relativeStoryPath : `./${relativeStoryPath}`;
+  };
+
+  const getStoryTranscriptWidth = (): number => Math.max(24, getContentWidth(terminalWidth) - 9);
+
+  const buildStoryTranscriptResponse = (
+    project: StoryProject,
+    activeView: AppState["activeStoryView"],
+    message: string,
+    projectId: string | null,
+    projectList: readonly StoryLibraryEntry[]
+  ): string =>
+    `${message}\n${buildStorySnapshot(
+      project,
+      activeView,
+      getStoryProjectPathLabel(projectId, projectList),
+      getStoryTranscriptWidth(),
+      { maxBodyLines: 3 }
+    )}`;
+
+  const appendStoryTextEntry = (
+    currentState: AppState,
+    prompt: string,
+    response: string,
+    model: string
+  ): AppState =>
+    appendTranscriptEntry(currentState, {
+      id: `story-view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      prompt,
+      response,
+      rawResponse: response,
+      provider: "storyforge",
+      model,
+      failed: false,
+      streaming: false
+    });
+
+  const appendStoryTranscriptEntry = (
+    currentState: AppState,
+    prompt: string,
+    project: StoryProject,
+    activeView: AppState["activeStoryView"],
+    message: string,
+    model: string = "story/project"
+  ): AppState => {
+    const response = buildStoryTranscriptResponse(
+      project,
+      activeView,
+      message,
+      currentState.storyProjectId,
+      currentState.storyProjects
+    );
+
+    return appendStoryTextEntry(currentState, prompt, response, model);
+  };
 
   const updateLatestTranscriptEntry = (
     currentState: AppState,
@@ -445,7 +683,7 @@ export function App({
         ...currentState,
         latestExchange:
           getLatestTranscriptEntry(currentState.transcript) ?? currentState.latestExchange,
-        pendingRequest: false,
+        pendingTask: null,
         opencodeSessionId: null
       },
       connectResult.nextConfig,
@@ -487,6 +725,138 @@ export function App({
     return openModelPickerModal(currentState, providerId, modelIds, selectedIndex);
   };
 
+  const getStoryStageLabel = (stage: StoryBootstrapStage): string => {
+    switch (stage) {
+      case "foundation":
+        return "World foundation";
+      case "characters":
+        return "Character generation";
+      case "timeline":
+        return "Timeline generation";
+      case "outline":
+        return "Outline generation";
+    }
+  };
+
+  const runStoryPipeline = async (
+    runId: number,
+    taskKind: "story-bootstrap" | "story-refresh",
+    baseProject: StoryProject,
+    scope: "all" | "world" | "characters" | "timeline" | "outline",
+    model: string
+  ): Promise<void> => {
+    await Promise.resolve();
+    let result: StoryTaskResult;
+
+    try {
+      result = await runStoryTask({
+        cwd,
+        model,
+        project: baseProject,
+        runner: structuredRunner,
+        scope,
+        onStageStart: ({ message }) => {
+          updateStoryTranscript(runId, message);
+        },
+        onStageComplete: ({ project, view, message }) => {
+          if (storyTaskRunIdRef.current !== runId) {
+            return;
+          }
+
+          applyStateUpdate((activeState) => ({
+            ...activeState,
+            storyProject: project,
+            storyProjects: syncStoryProjectList(
+              activeState.storyProjects,
+              activeState.storyProjectId,
+              project
+            ),
+            activeStoryView: view
+          }));
+          updateStoryTranscript(runId, message, project, view);
+        }
+      });
+    } catch (error) {
+      if (storyTaskRunIdRef.current !== runId) {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      applyStateUpdate((activeState) =>
+        setTransientNotice(
+          {
+            ...updateLatestTranscriptEntry(activeState, (latestEntry) => ({
+              ...latestEntry,
+              response: `Story task failed. ${message}`,
+              rawResponse: `Story task failed. ${message}`,
+              failed: true,
+              streaming: false
+            })),
+            pendingTask: null
+          },
+          "Story task failed."
+        )
+      );
+      return;
+    }
+
+    if (storyTaskRunIdRef.current !== runId) {
+      return;
+    }
+
+    applyStateUpdate((activeState) => {
+      const finalView =
+        scope === "all"
+          ? "outline"
+          : scope === "world"
+            ? "world"
+            : scope;
+      const successMessage =
+        taskKind === "story-bootstrap"
+          ? "Story tables are ready."
+          : scope === "all"
+            ? "Story tables refreshed."
+            : `Refreshed ${finalView}.`;
+      const failureMessage = result.failedStage
+        ? `${getStoryStageLabel(result.failedStage)} failed. Existing sections were kept.`
+        : "Story task failed.";
+      const transcriptMessage = result.ok
+        ? successMessage
+        : result.errorMessage
+          ? `${failureMessage} ${result.errorMessage}`
+          : failureMessage;
+      const transcriptResponse = buildStoryTranscriptResponse(
+        result.project,
+        finalView,
+        transcriptMessage,
+        activeState.storyProjectId,
+        syncStoryProjectList(activeState.storyProjects, activeState.storyProjectId, result.project)
+      );
+      const nextState = updateLatestTranscriptEntry(activeState, (latestEntry) => ({
+        ...latestEntry,
+        response: transcriptResponse,
+        rawResponse: transcriptResponse,
+        streaming: false,
+        failed: !result.ok
+      }));
+
+      return setTransientNotice(
+        {
+          ...nextState,
+          storyProject: result.project,
+          storyProjects: syncStoryProjectList(
+            nextState.storyProjects,
+            nextState.storyProjectId,
+            result.project
+          ),
+          activeStoryView: finalView,
+          pendingTask: null
+        },
+        result.ok ? successMessage : failureMessage
+      );
+    });
+  };
+
   const handlePlainPromptSubmit = (currentState: AppState, now: number): AppState => {
     const prompt = currentState.inputValue.trim();
 
@@ -505,8 +875,8 @@ export function App({
       return setTransientNotice(clearInputValue(currentState), "Run /models first.", now);
     }
 
-    if (currentState.pendingRequest) {
-      return setTransientNotice(currentState, "Wait for the current reply to finish.", now);
+    if (currentState.pendingTask) {
+      return setTransientNotice(currentState, "Wait for the current task to finish.", now);
     }
 
     const syncError = primeConnectionForRun(currentConnection);
@@ -532,6 +902,53 @@ export function App({
         failedEntry
       );
     }
+
+    if (currentState.storyProject?.meta.status === "awaiting_brief") {
+      const seededProject: StoryProject = {
+        ...currentState.storyProject,
+        brief: {
+          ...currentState.storyProject.brief,
+          seedPrompt: prompt
+        },
+        meta: {
+          ...currentState.storyProject.meta,
+          updatedAt: new Date().toISOString()
+        }
+      };
+      const storyRunId = storyTaskRunIdRef.current + 1;
+      storyTaskRunIdRef.current = storyRunId;
+      const pendingEntry: TranscriptEntry = {
+        id: `story-${Date.now()}-${storyRunId}`,
+        prompt,
+        response: "Generating world foundation...",
+        provider: currentConnection.provider,
+        model: currentModel,
+        failed: false,
+        rawResponse: "Generating world foundation...",
+        streaming: false
+      };
+      const initialState = appendTranscriptEntry(
+        persistStoryProjectState(
+          {
+            ...clearInputValue(currentState),
+            transientNotice: null,
+            pendingTask: {
+              kind: "story-bootstrap",
+              stage: "foundation"
+            }
+          },
+          seededProject,
+          "world",
+          "Story brief captured. Bootstrapping project...",
+          now
+        ),
+        pendingEntry
+      );
+
+      void runStoryPipeline(storyRunId, "story-bootstrap", seededProject, "all", currentModel);
+      return initialState;
+    }
+
     stopStreamingProcess();
     const streamRunId = streamRunIdRef.current + 1;
     streamRunIdRef.current = streamRunId;
@@ -549,7 +966,10 @@ export function App({
       {
         ...clearInputValue(currentState),
         transientNotice: null,
-        pendingRequest: true
+        pendingTask: {
+          kind: "chat",
+          stage: null
+        }
       },
       pendingEntry
     );
@@ -614,7 +1034,7 @@ export function App({
 
           return {
             ...nextState,
-            pendingRequest: false,
+            pendingTask: null,
             transientNotice: {
               message: "Message send failed.",
               expiresAt: Date.now() + 2_500
@@ -634,7 +1054,7 @@ export function App({
           if (!latestEntry) {
             return {
               ...activeState,
-              pendingRequest: false
+              pendingTask: null
             };
           }
 
@@ -649,13 +1069,374 @@ export function App({
               rawResponse: currentEntry.rawResponse ?? currentEntry.response,
               streaming: false
             })),
-            pendingRequest: false
+            pendingTask: null
           };
         });
       }
     });
 
     return initialState;
+  };
+
+  const executeParsedCommand = (
+    currentState: AppState,
+    parsedCommand: { command: string; args: string[] },
+    now: number
+  ): { nextState: AppState; shouldExit: boolean } => {
+    const storyResult = handleStoryCommand(
+      {
+        currentProject: currentState.storyProject,
+        currentProjectId: currentState.storyProjectId,
+        projects: currentState.storyProjects
+      },
+      parsedCommand
+    );
+    const commandPrompt = formatParsedCommandPrompt(parsedCommand);
+
+    if (storyResult.type !== "not-handled") {
+      if (storyResult.type === "notice") {
+        return {
+          nextState: setTransientNotice(clearInputValue(currentState), storyResult.message, now),
+          shouldExit: false
+        };
+      }
+
+      if (storyResult.type === "library") {
+        return {
+          nextState: appendStoryTextEntry(
+            setTransientNotice(clearInputValue(currentState), storyResult.message, now),
+            commandPrompt,
+            storyResult.response,
+            "story/library"
+          ),
+          shouldExit: false
+        };
+      }
+
+      if (storyResult.type === "create") {
+        const createResult = createStoryProject(cwd, storyResult.project);
+        const nextStateBase: AppState = {
+          ...clearInputValue(currentState),
+          storyProject: storyResult.project,
+          storyProjectId: createResult.projectId,
+          storyProjects: createResult.projects,
+          activeStoryView: storyResult.activeView
+        };
+        const nextState = appendStoryTranscriptEntry(
+          setTransientNotice(
+            nextStateBase,
+            createResult.error
+              ? `${storyResult.message} Saved for this run, but story persistence failed: ${createResult.error}`
+              : storyResult.message,
+            now
+          ),
+          commandPrompt,
+          storyResult.project,
+          storyResult.activeView,
+          storyResult.message
+        );
+
+        return {
+          nextState,
+          shouldExit: false
+        };
+      }
+
+      if (storyResult.type === "open") {
+        const activateError = setActiveStoryProject(cwd, storyResult.projectId);
+        const openedProject = loadStoryProject(cwd, storyResult.projectId);
+
+        if (!openedProject) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "The selected story project could not be loaded.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+
+        const nextState = appendStoryTranscriptEntry(
+          setTransientNotice(
+            {
+              ...clearInputValue(currentState),
+              storyProject: openedProject,
+              storyProjectId: storyResult.projectId,
+              activeStoryView: getDefaultStoryView(openedProject)
+            },
+            activateError
+              ? `${storyResult.message} Saved for this run, but project selection failed to persist: ${activateError}`
+              : storyResult.message,
+            now
+          ),
+          commandPrompt,
+          openedProject,
+          getDefaultStoryView(openedProject),
+          storyResult.message
+        );
+
+        return {
+          nextState,
+          shouldExit: false
+        };
+      }
+
+      if (storyResult.type === "view") {
+        return {
+          nextState: appendStoryTranscriptEntry(
+            setTransientNotice(
+              {
+                ...clearInputValue(currentState),
+                activeStoryView: storyResult.activeView
+              },
+              storyResult.message,
+              now
+            ),
+            commandPrompt,
+            currentState.storyProject as StoryProject,
+            storyResult.activeView,
+            storyResult.message
+          ),
+          shouldExit: false
+        };
+      }
+
+      if (storyResult.type === "mutate") {
+        return {
+          nextState: appendStoryTranscriptEntry(
+            persistStoryProjectState(
+              currentState,
+              storyResult.project,
+              storyResult.activeView,
+              storyResult.message,
+              now
+            ),
+            commandPrompt,
+            storyResult.project,
+            storyResult.activeView,
+            storyResult.message
+          ),
+          shouldExit: false
+        };
+      }
+
+      if (storyResult.type !== "refresh") {
+        return {
+          nextState: currentState,
+          shouldExit: false
+        };
+      }
+
+      const currentConnection = currentState.config.connection;
+      const currentModel = currentState.config.model;
+
+      if (!currentConnection) {
+        return {
+          nextState: setTransientNotice(clearInputValue(currentState), "Run /connect first.", now),
+          shouldExit: false
+        };
+      }
+
+      if (!currentModel) {
+        return {
+          nextState: setTransientNotice(clearInputValue(currentState), "Run /models first.", now),
+          shouldExit: false
+        };
+      }
+
+      const syncError = primeConnectionForRun(currentConnection);
+
+      if (syncError) {
+        return {
+          nextState: setTransientNotice(
+            clearInputValue(currentState),
+            `Credential sync failed before refresh: ${syncError}`,
+            now
+          ),
+          shouldExit: false
+        };
+      }
+
+      const storyProject = currentState.storyProject;
+
+      if (!storyProject) {
+        return {
+          nextState: setTransientNotice(
+            clearInputValue(currentState),
+            "Run /init first to create a story project.",
+            now
+          ),
+          shouldExit: false
+        };
+      }
+
+      const storyRunId = storyTaskRunIdRef.current + 1;
+      storyTaskRunIdRef.current = storyRunId;
+      const pendingEntry: TranscriptEntry = {
+        id: `story-refresh-${Date.now()}-${storyRunId}`,
+        prompt: commandPrompt,
+        response: storyResult.message,
+        provider: currentConnection.provider,
+        model: currentModel,
+        failed: false,
+        rawResponse: storyResult.message,
+        streaming: false
+      };
+      const nextState = appendTranscriptEntry(
+        setTransientNotice(
+          {
+            ...clearInputValue(currentState),
+            activeStoryView: storyResult.activeView,
+            pendingTask: {
+              kind: "story-refresh",
+              stage: storyResult.scope
+            }
+          },
+          storyResult.message,
+          now
+        ),
+        pendingEntry
+      );
+
+      void runStoryPipeline(
+        storyRunId,
+        "story-refresh",
+        storyProject,
+        storyResult.scope,
+        currentModel
+      );
+
+      return {
+        nextState,
+        shouldExit: false
+      };
+    }
+
+    switch (parsedCommand.command) {
+      case "/connect":
+        if (parsedCommand.args.length === 0) {
+          return {
+            nextState: openConnectProviderModal(currentState),
+            shouldExit: false
+          };
+        }
+
+        {
+          const provider = parsedCommand.args[0]?.toLowerCase();
+          const providerOption = provider ? getProviderOption(provider) : null;
+
+          if (!providerOption) {
+            return {
+              nextState: setTransientNotice(clearInputValue(currentState), `Unknown provider: ${provider ?? ""}`, now),
+              shouldExit: false
+            };
+          }
+
+          if (parsedCommand.args.length === 1) {
+            return {
+              nextState: openProviderConnectFlow(currentState, providerOption.id, now),
+              shouldExit: false
+            };
+          }
+
+          if (providerOption.authKind === "oauth") {
+            return {
+              nextState: setTransientNotice(
+                clearInputValue(currentState),
+                `Use /connect and select ${providerOption.title} to launch its OAuth flow.`,
+                now
+              ),
+              shouldExit: false
+            };
+          }
+        }
+
+        if (parsedCommand.args.length < 2) {
+          return {
+            nextState: setTransientNotice(clearInputValue(currentState), "Usage: /connect <provider> <api-key> [base-url]", now),
+            shouldExit: false
+          };
+        }
+
+        {
+          const [providerRaw, apiKey, ...baseUrlParts] = parsedCommand.args;
+          const provider = providerRaw.toLowerCase();
+          const nextState = connectWithSession(
+            currentState,
+            {
+              provider,
+              authMode: "api",
+              apiKey,
+              baseUrl: baseUrlParts.length > 0 ? baseUrlParts.join(" ").trim() || null : null,
+              authLabel: "Saved in .storyforge"
+            },
+            now
+          );
+
+          return {
+            nextState,
+            shouldExit: false
+          };
+        }
+      case "/model":
+      case "/models":
+        if (parsedCommand.args.length === 0) {
+          return {
+            nextState: openModelPickerForCurrentConnection(currentState, now),
+            shouldExit: false
+          };
+        }
+
+        if (parsedCommand.args.length !== 1) {
+          return {
+            nextState: setTransientNotice(clearInputValue(currentState), "Usage: /model <provider/model>", now),
+            shouldExit: false
+          };
+        }
+
+        {
+          const outcome = applyModelCommand(currentState.config, parsedCommand.args[0]);
+
+          if ("error" in outcome) {
+            return {
+              nextState: setTransientNotice(clearInputValue(currentState), outcome.error, now),
+              shouldExit: false
+            };
+          }
+
+          const nextState = applyConfigAndNotice(
+            {
+              ...currentState,
+              latestExchange:
+                getLatestTranscriptEntry(currentState.transcript) ?? currentState.latestExchange,
+              opencodeSessionId: null
+            },
+            outcome.nextConfig,
+            outcome.message,
+            now
+          );
+
+          return {
+            nextState: persistConfig(nextState, outcome.nextConfig),
+            shouldExit: false
+          };
+        }
+      case "/exit":
+        return {
+          nextState: currentState,
+          shouldExit: true
+        };
+      default:
+        return {
+          nextState: setTransientNotice(
+            clearInputValue(currentState),
+            `Unknown command: ${parsedCommand.command}`,
+            now
+          ),
+          shouldExit: false
+        };
+    }
   };
 
   const executePaletteAction = (currentState: AppState, now: number): { nextState: AppState; shouldExit: boolean } => {
@@ -686,10 +1467,21 @@ export function App({
       };
     }
 
-    return {
-      nextState: paletteState,
-      shouldExit: true
-    };
+    if (selectedItem.action === "exit") {
+      return {
+        nextState: paletteState,
+        shouldExit: true
+      };
+    }
+
+    return executeParsedCommand(
+      paletteState,
+      {
+        command: selectedItem.command,
+        args: []
+      },
+      now
+    );
   };
 
   const handleConnectProviderSubmit = (currentState: AppState): AppState => {
@@ -884,130 +1676,7 @@ export function App({
       };
     }
 
-    switch (parsedCommand.command) {
-      case "/connect":
-        if (parsedCommand.args.length === 0) {
-          return {
-            nextState: openConnectProviderModal(currentState),
-            shouldExit: false
-          };
-        }
-
-        {
-          const provider = parsedCommand.args[0]?.toLowerCase();
-          const providerOption = provider ? getProviderOption(provider) : null;
-
-          if (!providerOption) {
-            return {
-              nextState: setTransientNotice(clearInputValue(currentState), `Unknown provider: ${provider ?? ""}`, now),
-              shouldExit: false
-            };
-          }
-
-          if (parsedCommand.args.length === 1) {
-            return {
-              nextState: openProviderConnectFlow(currentState, providerOption.id, now),
-              shouldExit: false
-            };
-          }
-
-          if (providerOption.authKind === "oauth") {
-            return {
-              nextState: setTransientNotice(
-                clearInputValue(currentState),
-                `Use /connect and select ${providerOption.title} to launch its OAuth flow.`,
-                now
-              ),
-              shouldExit: false
-            };
-          }
-        }
-
-        if (parsedCommand.args.length < 2) {
-          return {
-            nextState: setTransientNotice(clearInputValue(currentState), "Usage: /connect <provider> <api-key> [base-url]", now),
-            shouldExit: false
-          };
-        }
-
-        {
-          const [providerRaw, apiKey, ...baseUrlParts] = parsedCommand.args;
-          const provider = providerRaw.toLowerCase();
-          const nextState = connectWithSession(
-            currentState,
-            {
-              provider,
-              authMode: "api",
-              apiKey,
-              baseUrl: baseUrlParts.length > 0 ? baseUrlParts.join(" ").trim() || null : null,
-              authLabel: "Saved in .storyforge"
-            },
-            now
-          );
-
-          return {
-            nextState,
-            shouldExit: false
-          };
-        }
-      case "/model":
-      case "/models":
-        if (parsedCommand.args.length === 0) {
-          return {
-            nextState: openModelPickerForCurrentConnection(currentState, now),
-            shouldExit: false
-          };
-        }
-
-        if (parsedCommand.args.length !== 1) {
-          return {
-            nextState: setTransientNotice(clearInputValue(currentState), "Usage: /model <provider/model>", now),
-            shouldExit: false
-          };
-        }
-
-        {
-          const outcome = applyModelCommand(currentState.config, parsedCommand.args[0]);
-
-          if ("error" in outcome) {
-            return {
-              nextState: setTransientNotice(clearInputValue(currentState), outcome.error, now),
-              shouldExit: false
-            };
-          }
-
-          const nextState = applyConfigAndNotice(
-            {
-              ...currentState,
-              latestExchange:
-                getLatestTranscriptEntry(currentState.transcript) ?? currentState.latestExchange,
-              opencodeSessionId: null
-            },
-            outcome.nextConfig,
-            outcome.message,
-            now
-          );
-
-          return {
-            nextState: persistConfig(nextState, outcome.nextConfig),
-            shouldExit: false
-          };
-        }
-      case "/exit":
-        return {
-          nextState: currentState,
-          shouldExit: true
-        };
-      default:
-        return {
-          nextState: setTransientNotice(
-            clearInputValue(currentState),
-            `Unknown command: ${parsedCommand.command}`,
-            now
-          ),
-          shouldExit: false
-        };
-    }
+    return executeParsedCommand(currentState, parsedCommand, now);
   };
 
   useEffect(() => {
@@ -1216,7 +1885,7 @@ export function App({
       return;
     }
 
-    if (currentState.pendingRequest) {
+    if (currentState.pendingTask) {
       if (key.upArrow) {
         commitState(moveTranscriptScroll(currentState, 1));
         return;
@@ -1227,7 +1896,7 @@ export function App({
         return;
       }
 
-      if (key.escape) {
+      if (key.escape && currentState.pendingTask.kind === "chat") {
         stopStreamingProcess();
         const nextState = updateLatestTranscriptEntry(currentState, (latestEntry) => ({
           ...latestEntry,
@@ -1238,7 +1907,7 @@ export function App({
         }));
         commitState({
           ...nextState,
-          pendingRequest: false,
+          pendingTask: null,
           transientNotice: {
             message: "Generation cancelled.",
             expiresAt: Date.now() + 2_500

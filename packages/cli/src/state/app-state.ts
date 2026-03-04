@@ -1,5 +1,6 @@
 import { copy } from "../content/copy.js";
 import { resolveViewportMode } from "../layout/viewport.js";
+import type { StoryLibraryEntry, StoryProject, StoryView } from "../story/types.js";
 import type {
   AppState,
   ConnectCredentialsModal,
@@ -17,6 +18,26 @@ function createEmptySessionConfig(): SessionConfig {
     connection: null,
     model: null
   };
+}
+
+function getInitialStoryView(project: StoryProject | null): StoryView | null {
+  if (!project) {
+    return null;
+  }
+
+  if (project.outline.length > 0) {
+    return "outline";
+  }
+
+  if (project.timeline.length > 0) {
+    return "timeline";
+  }
+
+  if (project.characters.length > 0) {
+    return "characters";
+  }
+
+  return "world";
 }
 
 function clampIndex(value: number, itemCount: number): number {
@@ -58,19 +79,26 @@ function updateOauthModal(
 
 export function createInitialAppState(
   terminalWidth: number,
-  config: SessionConfig = createEmptySessionConfig()
+  config: SessionConfig = createEmptySessionConfig(),
+  storyProject: StoryProject | null = null,
+  storyProjectId: string | null = null,
+  storyProjects: readonly StoryLibraryEntry[] = []
 ): AppState {
   return {
     inputValue: "",
     transientNotice: null,
     viewportMode: resolveViewportMode(terminalWidth),
     config,
+    storyProject,
+    storyProjectId,
+    storyProjects,
+    activeStoryView: getInitialStoryView(storyProject),
     commandSelectionIndex: 0,
     modal: null,
     latestExchange: null,
     transcript: [],
     transcriptScrollOffset: 0,
-    pendingRequest: false,
+    pendingTask: null,
     opencodeSessionId: null
   };
 }

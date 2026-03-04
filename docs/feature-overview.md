@@ -1,6 +1,6 @@
 # Feature Overview
 
-Storyforge currently ships a terminal-first preview shell with a functional provider and model setup loop.
+Storyforge now ships a terminal-first shell with a persisted story project layer and the first structured story bootstrap workflow.
 
 ## Shell UI
 
@@ -18,6 +18,27 @@ Storyforge currently ships a terminal-first preview shell with a functional prov
 - `Esc` to close overlays, clear command preview, cancel generation, or exit
 - `Ctrl+C` to exit immediately
 
+## Story Project
+
+- `/init` creates a new blank story scaffold in the current working directory
+- story state is persisted as a local project library in `./.storyforge/workspace.json`
+- each story project is stored as its own file under `./.storyforge/projects/`
+- `/projects` lists saved local projects and reopens one by row number
+- the first plain prompt after `/init` is consumed as the story brief
+- Storyforge then generates structured tables for:
+  world state, characters, timeline beats, and chapter outline
+- story sections remain editable through command-driven updates
+
+## Story Tables
+
+- `/world` shows a key-value world-state table
+- `/char` shows the character table and supports add/set/remove edits
+- `/timeline` shows the timeline table and supports add/set/remove edits
+- `/outline` shows the chapter-plan table and supports set/remove edits
+- `/init refresh` reruns all structured sections from the saved brief
+- `/init refresh world|char|timeline|outline` reruns one section only
+- story table snapshots are appended into transcript history, so earlier `/char` and `/timeline` views remain visible as you switch
+
 ## Provider Setup
 
 - `/connect` opens an interactive provider picker
@@ -34,19 +55,17 @@ Storyforge currently ships a terminal-first preview shell with a functional prov
 
 ## Prompt Execution
 
-- prompts stream through local `opencode run --format json`
+- after story bootstrap is complete, normal prompts stream through local `opencode run --format json`
 - responses are shown in a live transcript panel
 - transcript history is preserved inside the current app session
 - active generations can be cancelled with `Esc`
 - repeated prompts reuse the same `opencode` session when available
 
-## Preview Limits
+## Current Limits
 
-Storyforge is not a full writing tool yet.
+Storyforge is still early. The current build does not include:
 
-The current build does not include:
-
-- story drafting workflows beyond raw prompt sending
-- outline management
-- project files, notes, or chapter storage
+- inline table cell editing
+- chapter drafting from the generated outline
 - export flows
+- cross-directory project libraries

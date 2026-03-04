@@ -10,6 +10,8 @@ packages/*/dist/
 .env.*
 !.env.example
 
+.storyforge/
+
 .cache/
 .turbo/
 .vite/

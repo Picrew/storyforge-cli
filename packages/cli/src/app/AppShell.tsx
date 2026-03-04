@@ -65,13 +65,14 @@ export function AppShell({
         ? [{ id: "latest", ...state.latestExchange }]
         : [];
   const hasTranscript = transcriptTurns.length > 0;
+  const showWelcome = !hasTranscript;
   const transcriptVisibleLines = Math.max(
     8,
     Math.min(
-      22,
+      26,
       terminalHeight -
-        (hasTranscript ? 10 : condensedWelcome ? 18 : 22) -
-        (state.transientNotice ? 2 : 0)
+        (hasTranscript ? 5 : condensedWelcome ? 18 : 22) -
+        (state.transientNotice ? 1 : 0)
     )
   );
 
@@ -153,7 +154,7 @@ export function AppShell({
       ) : null}
       <Box width={contentWidth} flexDirection="column">
         <Header mode={state.viewportMode} />
-        {!hasTranscript ? (
+        {showWelcome ? (
           <Box marginTop={1}>
             <WelcomeCard width={contentWidth} condensed={condensedWelcome} />
           </Box>
