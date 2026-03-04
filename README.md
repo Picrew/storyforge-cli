@@ -8,9 +8,9 @@
 
 Writer-first terminal UI for scenes, arcs, and long-form fiction.
 
-Storyforge is an open-source CLI interface for novel workflows. The repository currently ships a first interactive shell: a polished startup screen, a branded input lane, responsive terminal layout, and a minimal persisted model setup flow.
+Storyforge is an open-source CLI interface for novel workflows. The repository now ships a real first writing feature: a persisted story project library, an `/init` bootstrap flow, and structured story tables inside the terminal UI.
 
-> This is still a preview build. Story drafting is not implemented yet, but `/connect` and `/models` are available for basic provider setup.
+> This is still an early build, but Storyforge can now initialize a story project, capture a story brief, and generate editable `world`, `characters`, `timeline`, and `outline` tables.
 
 ![Storyforge preview shell](./docs/assets/storyforge-preview-shell.jpg)
 
@@ -30,13 +30,17 @@ Storyforge is an open-source CLI interface for novel workflows. The repository c
 - A `/models` model picker that uses the local `opencode models <provider>` list when available.
 - Manual command support for `/connect <provider> <api-key> [base-url]` and `/model <provider/model>`.
 - Automatic restore of the last saved provider and model on the next launch.
+- A persisted per-directory story project library in `./.storyforge/workspace.json` plus per-project files in `./.storyforge/projects/`.
+- `/init` to create a new blank story scaffold before any AI generation happens.
+- `/projects` to list saved local story projects and reopen one by index.
+- The first plain prompt after `/init` becomes the story brief and bootstraps:
+  `world`, `characters`, `timeline`, and `outline`.
+- Story tables render directly inside transcript history for:
+  `/world`, `/char`, `/timeline`, and `/outline`.
+- Command-based editing for structured story data, including add/set/remove flows.
 - An adaptive footer for wide and narrow terminals.
 
-If you press `Enter` on a normal story prompt, Storyforge clears the prompt and shows the current preview notice:
-
-```text
-UI preview only. Story actions are not implemented yet.
-```
+After the initial story bootstrap is complete, normal prompts still stream through the transcript panel as free-form chat.
 
 ## Quick Start
 

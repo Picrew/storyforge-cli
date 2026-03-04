@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { render } from "ink-testing-library";
@@ -11,8 +14,10 @@ import {
   getCommandPreviewItems,
   shouldShowCommandPreview
 } from "../packages/cli/src/commands/command-preview.js";
+import { handleStoryCommand } from "../packages/cli/src/commands/story-commands.js";
 import { getProviderMatches } from "../packages/cli/src/data/provider-catalog.js";
 import { AppShell } from "../packages/cli/src/app/AppShell.js";
+import { createBlankStoryProject } from "../packages/cli/src/story/project-store.js";
 import {
   appendInputCharacter,
   createInitialAppState,
@@ -39,6 +44,10 @@ async function waitForCondition(
   }
 
   throw new Error("Timed out waiting for render state.");
+}
+
+function makeTempDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "storyforge-input-"));
 }
 
 describe("Input frame interactions", () => {
@@ -166,16 +175,182 @@ describe("Input frame interactions", () => {
     expect(getCommandAutocompleteValue("/mod", 0)).toBe("/models ");
   });
 
+  it("autocompletes /char and /timeline from partial input", () => {
+    expect(getCommandAutocompleteValue("/cha", 0)).toBe("/char ");
+    expect(getCommandAutocompleteValue("/tim", 0)).toBe("/timeline ");
+    expect(getCommandAutocompleteValue("/proj", 0)).toBe("/projects ");
+  });
+
   it("does not show slash-command suggestions when nothing matches", () => {
     expect(getCommandPreviewItems("/foo")).toEqual([]);
     expect(shouldShowCommandPreview("/foo")).toBe(false);
   });
 
+  it("shows story commands in the slash-command palette", () => {
+    const app = render(
+      <AppShell
+        state={{
+          ...createInitialAppState(100),
+          inputValue: "/"
+        }}
+        terminalWidth={100}
+        cwd="/tmp/storyforge"
+      />
+    );
+
+    const frame = app.lastFrame() ?? "";
+
+    expect(frame).toContain("/init");
+    expect(frame).toContain("/projects");
+    expect(frame).toContain("/world");
+    expect(frame).toContain("/char");
+    expect(frame).toContain("/timeline");
+    expect(frame).toContain("/outline");
+    app.unmount();
+  });
+
+  it("supports story table view commands and mutations", () => {
+    let project = createBlankStoryProject();
+    project.meta.status = "awaiting_brief";
+    const storyContext = () => ({
+      currentProject: project,
+      currentProjectId: "project-1",
+      projects: [
+        {
+          id: "project-1",
+          title: project.meta.title,
+          status: project.meta.status,
+          createdAt: project.meta.createdAt,
+          updatedAt: project.meta.updatedAt,
+          file: "projects/project-1.json"
+        }
+      ]
+    });
+    project.outline.push({
+      id: "outline-1",
+      number: 1,
+      title: "Draft",
+      purpose: "",
+      summary: "",
+      hook: "",
+      targetWords: 400
+    });
+
+    const worldView = handleStoryCommand(storyContext(), {
+      command: "/world",
+      args: []
+    });
+    expect(worldView).toMatchObject({
+      type: "view",
+      activeView: "world"
+    });
+
+    const worldSet = handleStoryCommand(storyContext(), {
+      command: "/world",
+      args: ["set", "premise", "Comic", "chaos"]
+    });
+    expect(worldSet.type).toBe("mutate");
+    project = worldSet.type === "mutate" ? worldSet.project : project;
+    expect(project.world.premise).toBe("Comic chaos");
+
+    const charAdd = handleStoryCommand(storyContext(), {
+      command: "/char",
+      args: ["add", "Mira", "Vale"]
+    });
+    expect(charAdd.type).toBe("mutate");
+    project = charAdd.type === "mutate" ? charAdd.project : project;
+    expect(project.characters[0]?.name).toBe("Mira Vale");
+
+    const charSet = handleStoryCommand(storyContext(), {
+      command: "/char",
+      args: ["set", "1", "role", "Protagonist"]
+    });
+    expect(charSet.type).toBe("mutate");
+    project = charSet.type === "mutate" ? charSet.project : project;
+    expect(project.characters[0]?.role).toBe("Protagonist");
+
+    const timelineAdd = handleStoryCommand(storyContext(), {
+      command: "/timeline",
+      args: ["add", "Lobby", "reveal"]
+    });
+    expect(timelineAdd.type).toBe("mutate");
+    project = timelineAdd.type === "mutate" ? timelineAdd.project : project;
+    expect(project.timeline[0]?.label).toBe("Lobby reveal");
+
+    const timelineSet = handleStoryCommand(storyContext(), {
+      command: "/timeline",
+      args: ["set", "1", "stakes", "Funding", "risk"]
+    });
+    expect(timelineSet.type).toBe("mutate");
+    project = timelineSet.type === "mutate" ? timelineSet.project : project;
+    expect(project.timeline[0]?.stakes).toBe("Funding risk");
+
+    const outlineSet = handleStoryCommand(storyContext(), {
+      command: "/outline",
+      args: ["set", "1", "title", "Opening", "Pitch"]
+    });
+    expect(outlineSet.type).toBe("mutate");
+    project = outlineSet.type === "mutate" ? outlineSet.project : project;
+    expect(project.outline[0]?.title).toBe("Opening Pitch");
+  });
+
+  it("shows helpful errors for invalid story edits", () => {
+    const project = createBlankStoryProject();
+    project.meta.status = "awaiting_brief";
+    const storyContext = {
+      currentProject: project,
+      currentProjectId: "project-1",
+      projects: [
+        {
+          id: "project-1",
+          title: project.meta.title,
+          status: project.meta.status,
+          createdAt: project.meta.createdAt,
+          updatedAt: project.meta.updatedAt,
+          file: "projects/project-1.json"
+        }
+      ]
+    };
+    project.characters.push({
+      id: "char-1",
+      name: "Mira",
+      role: "",
+      age: "",
+      description: "",
+      motivation: "",
+      conflict: "",
+      arc: "",
+      relationships: "",
+      tags: ""
+    });
+
+    expect(
+      handleStoryCommand(storyContext, {
+        command: "/char",
+        args: ["set", "9", "role", "Ghost"]
+      })
+    ).toEqual({
+      type: "notice",
+      message: "Character row is out of range."
+    });
+
+    expect(
+      handleStoryCommand(storyContext, {
+        command: "/world",
+        args: ["set", "mystery", "nope"]
+      })
+    ).toEqual({
+      type: "notice",
+      message: "Unknown world field: mystery"
+    });
+  });
+
   it("treats unknown slash commands as errors instead of opening the palette", async () => {
+    const cwd = makeTempDir();
     const app = render(
       <App
         terminalWidthOverride={100}
-        cwdOverride="/tmp/storyforge"
+        cwdOverride={cwd}
         initialConfigOverride={{
           connection: null,
           model: null
@@ -184,11 +359,11 @@ describe("Input frame interactions", () => {
     );
 
     app.stdin.write("/foo");
-    await waitForCondition(() => !app.lastFrame().includes("Describe a premise, scene, or character..."));
+    await waitForCondition(() => !(app.lastFrame() ?? "").includes("Describe a premise, scene, or character..."));
     expect(app.lastFrame()).not.toContain("tab autocomplete");
 
     app.stdin.write("\r");
-    await waitForCondition(() => app.lastFrame().includes("Unknown command: /foo"));
+    await waitForCondition(() => (app.lastFrame() ?? "").includes("Unknown command: /foo"));
 
     expect(app.lastFrame()).toContain("Unknown command: /foo");
     expect(app.lastFrame()).not.toContain("Connect a provider");
@@ -196,10 +371,11 @@ describe("Input frame interactions", () => {
   });
 
   it("clears the palette input when /models cannot open yet", async () => {
+    const cwd = makeTempDir();
     const app = render(
       <App
         terminalWidthOverride={100}
-        cwdOverride="/tmp/storyforge"
+        cwdOverride={cwd}
         initialConfigOverride={{
           connection: null,
           model: null
@@ -208,11 +384,11 @@ describe("Input frame interactions", () => {
     );
 
     app.stdin.write("/models");
-    await waitForCondition(() => app.lastFrame().includes("tab autocomplete"));
+    await waitForCondition(() => (app.lastFrame() ?? "").includes("tab autocomplete"));
     expect(app.lastFrame()).toContain("tab autocomplete");
 
     app.stdin.write("\r");
-    await waitForCondition(() => app.lastFrame().includes("Run /connect first."));
+    await waitForCondition(() => (app.lastFrame() ?? "").includes("Run /connect first."));
 
     expect(app.lastFrame()).toContain("Run /connect first.");
     expect(app.lastFrame()).not.toContain("/models_");

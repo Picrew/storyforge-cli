@@ -8,9 +8,9 @@
 
 一个面向场景、情节弧线与长篇虚构创作的写作者优先终端界面。
 
-Storyforge 是一个面向小说工作流的开源 CLI 界面。当前仓库提供第一阶段的交互外壳：包括启动首屏、品牌化输入区、响应式终端布局，以及一个最小可用的模型配置流程。
+Storyforge 是一个面向小说工作流的开源 CLI 界面。当前仓库已经具备第一个真正的写作核心能力：持久化小说项目库、`/init` 初始化流程，以及在终端里展示的结构化故事表格。
 
-> 当前版本仍然是预览构建。故事创作流程还没实现，但已经可以用 `/connect` 和 `/models` 做基础 provider 配置。
+> 当前版本仍然处于早期阶段，但已经可以初始化一部小说、记录故事 brief，并生成可编辑的 `world`、`characters`、`timeline` 和 `outline` 表。
 
 ![Storyforge 预览界面](./docs/assets/storyforge-preview-shell.jpg)
 
@@ -30,13 +30,16 @@ Storyforge 是一个面向小说工作流的开源 CLI 界面。当前仓库提�
 - `/models` 会打开模型选择器；本机装了 `opencode` 时，会优先读取 `opencode models <provider>` 的结果。
 - 也支持直接手输 `/connect <provider> <api-key> [base-url]` 和 `/model <provider/model>`。
 - 再次打开时会自动恢复上一次保存的 provider 和 model。
+- 每个工作目录都会在 `./.storyforge/workspace.json` 中维护项目索引，并把具体项目保存到 `./.storyforge/projects/`。
+- 可以反复用 `/init` 创建新的空白小说骨架，再开始填写故事 brief。
+- `/projects` 可以列出当前目录下保存过的小说项目，并按序号重新打开。
+- `/init` 之后的第一条普通文本会被当作故事生成 brief，并依次生成：
+  `world`、`characters`、`timeline`、`outline`。
+- `/world`、`/char`、`/timeline`、`/outline` 会把当前结构化表格直接追加到 transcript 历史里。
+- 结构化故事数据支持命令式编辑，包括 add/set/remove。
 - 能适配宽窄终端的底部状态栏。
 
-在普通故事输入上按下 `Enter` 后，Storyforge 会清空输入，并显示当前预览提示：
-
-```text
-UI preview only. Story actions are not implemented yet.
-```
+完成首次 bootstrap 后，后续普通 prompt 仍然会继续走自由聊天式的流式对话面板。
 
 ## 快速开始
 

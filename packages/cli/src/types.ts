@@ -1,3 +1,10 @@
+import type {
+  PendingTask,
+  StoryLibraryEntry,
+  StoryProject,
+  StoryView
+} from "./story/types.js";
+
 export type ViewportMode = "hero" | "compact" | "minimal";
 
 export interface ThemeTokens {
@@ -98,12 +105,16 @@ export interface AppState {
   transientNotice: TransientNotice | null;
   viewportMode: ViewportMode;
   config: SessionConfig;
+  storyProject: StoryProject | null;
+  storyProjectId: string | null;
+  storyProjects: readonly StoryLibraryEntry[];
+  activeStoryView: StoryView | null;
   commandSelectionIndex: number;
   modal: ModalState | null;
   latestExchange: LatestExchange | null;
   transcript: readonly TranscriptEntry[];
   transcriptScrollOffset: number;
-  pendingRequest: boolean;
+  pendingTask: PendingTask | null;
   opencodeSessionId: string | null;
 }
 
