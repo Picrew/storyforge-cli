@@ -26,8 +26,33 @@ export interface StoredOauthCredential {
   accountId: string | null;
 }
 
+function isWritableDirectory(directoryPath: string): boolean {
+  try {
+    fs.mkdirSync(directoryPath, { recursive: true });
+    fs.accessSync(directoryPath, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function resolveStoryforgeOpencodeDataDir(
+  homeDir: string = os.homedir(),
+  tempDir: string = os.tmpdir()
+): string {
+  const preferredPath = path.join(homeDir, ".storyforge", "xdg-data");
+
+  if (isWritableDirectory(preferredPath)) {
+    return preferredPath;
+  }
+
+  const fallbackPath = path.join(tempDir, "storyforge", "xdg-data");
+  fs.mkdirSync(fallbackPath, { recursive: true });
+  return fallbackPath;
+}
+
 export function getStoryforgeOpencodeDataDir(): string {
-  return path.join(os.homedir(), ".storyforge", "xdg-data");
+  return resolveStoryforgeOpencodeDataDir();
 }
 
 export function getSystemOpencodeAuthPath(): string {

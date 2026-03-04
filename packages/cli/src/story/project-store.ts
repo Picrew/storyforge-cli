@@ -35,6 +35,7 @@ function asNullableNumber(value: unknown): number | null {
 
 function normalizeStoryStatus(value: unknown): StoryLibraryEntry["status"] {
   return value === "awaiting_brief" ||
+    value === "bootstrapping" ||
     value === "ready" ||
     value === "partial" ||
     value === "empty"

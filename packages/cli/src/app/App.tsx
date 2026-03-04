@@ -755,8 +755,22 @@ export function App({
         project: baseProject,
         runner: structuredRunner,
         scope,
-        onStageStart: ({ message }) => {
-          updateStoryTranscript(runId, message);
+        onStageStart: ({ project, view, message }) => {
+          if (storyTaskRunIdRef.current !== runId) {
+            return;
+          }
+
+          applyStateUpdate((activeState) => ({
+            ...activeState,
+            storyProject: project,
+            storyProjects: syncStoryProjectList(
+              activeState.storyProjects,
+              activeState.storyProjectId,
+              project
+            ),
+            activeStoryView: view
+          }));
+          updateStoryTranscript(runId, message, project, view);
         },
         onStageComplete: ({ project, view, message }) => {
           if (storyTaskRunIdRef.current !== runId) {
@@ -912,19 +926,32 @@ export function App({
         },
         meta: {
           ...currentState.storyProject.meta,
+          status: "bootstrapping",
           updatedAt: new Date().toISOString()
         }
       };
       const storyRunId = storyTaskRunIdRef.current + 1;
       storyTaskRunIdRef.current = storyRunId;
+      const pendingStoryProjects = syncStoryProjectList(
+        currentState.storyProjects,
+        currentState.storyProjectId,
+        seededProject
+      );
+      const pendingResponse = buildStoryTranscriptResponse(
+        seededProject,
+        "world",
+        "Generating world foundation...",
+        currentState.storyProjectId,
+        pendingStoryProjects
+      );
       const pendingEntry: TranscriptEntry = {
         id: `story-${Date.now()}-${storyRunId}`,
         prompt,
-        response: "Generating world foundation...",
+        response: pendingResponse,
         provider: currentConnection.provider,
         model: currentModel,
         failed: false,
-        rawResponse: "Generating world foundation...",
+        rawResponse: pendingResponse,
         streaming: false
       };
       const initialState = appendTranscriptEntry(

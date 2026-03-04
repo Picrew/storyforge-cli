@@ -1,4 +1,9 @@
-export type StoryStatus = "empty" | "awaiting_brief" | "ready" | "partial";
+export type StoryStatus =
+  | "empty"
+  | "awaiting_brief"
+  | "bootstrapping"
+  | "ready"
+  | "partial";
 
 export interface StoryMeta {
   title: string;
