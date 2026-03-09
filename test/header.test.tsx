@@ -11,7 +11,7 @@ describe("Header rendering", () => {
     );
 
     expect(app.lastFrame()).toContain("/================");
-    expect(app.lastFrame()).toContain("::::  ::::");
+    expect(app.lastFrame()).toContain("::::::  ::::::");
     expect(app.lastFrame()).toContain("STORYFORGE // preview build");
     app.unmount();
   });
@@ -21,8 +21,8 @@ describe("Header rendering", () => {
       <AppShell state={createInitialAppState(80)} terminalWidth={80} cwd="/tmp/storyforge" />
     );
 
-    expect(app.lastFrame()).toContain("> ====");
-    expect(app.lastFrame()).toContain("::::");
+    expect(app.lastFrame()).toContain("████");
+    expect(app.lastFrame()).toContain(":::::: ::::::");
     expect(app.lastFrame()).not.toContain("/================");
     app.unmount();
   });

@@ -1,7 +1,7 @@
 import type { ViewportMode } from "../types.js";
 
 const HERO_BREAKPOINT = 100;
-const COMPACT_BREAKPOINT = 72;
+const COMPACT_BREAKPOINT = 74;
 const WELCOME_CONDENSE_BREAKPOINT = 84;
 const MAX_CONTENT_WIDTH = 110;
 const MIN_CONTENT_WIDTH = 32;
