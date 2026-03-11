@@ -1,0 +1,47 @@
+Storyforge V2 Feature Framework (State-Simulation First)
+
++----------------------------------------------------------------------------------+
+| 1) Project + State Layer                                                         |
+|    - /init, /projects                                                            |
+|    - StoryProject v2 schema + v1 migration                                       |
+|    - world / characters / timeline / outline                                     |
++---------------------------------------------+------------------------------------+
+                                              |
+                                              v
++----------------------------------------------------------------------------------+
+| 2) Event Commit Layer                                                            |
+|    - /commit --chapter chNN <event>                                              |
+|    - /commit --patch-file                                                        |
+|    - PatchOps (world.set / character.set / timeline.add|set / item.* /          |
+|      foreshadow.add|resolve)                                                     |
++---------------------------------------------+------------------------------------+
+                                              |
+                                              v
++----------------------------------------------------------------------------------+
+| 3) Deterministic CI Layer                                                        |
+|    - /ci run [--all|--commit]                                                    |
+|    - Rules: timeline monotonic / entity exists / inventory conservation /        |
+|      foreshadow due                                                              |
+|    - /status health summary                                                      |
++---------------------------------------------+------------------------------------+
+                                              |
+                                              v
++----------------------------------------------------------------------------------+
+| 4) Dependency + Incremental Layer                                                |
+|    - build_impact graph                                                          |
+|    - reads/writes dependency edges                                               |
+|    - dirty chapter propagation                                                   |
+|    - /log [--visual]                                                             |
++---------------------------------------------+------------------------------------+
+                                              |
+                                              v
++----------------------------------------------------------------------------------+
+| 5) Render + Compile Layer                                                        |
+|    - /render chNN|range|all [--force]                                            |
+|    - Output: .storyforge/chapters/chNN.md                                        |
+|    - /compile range|all [--output]                                               |
+|    - Output: .storyforge/manuscript/story.md                                     |
++----------------------------------------------------------------------------------+
+
+Execution Spine:
+User Command -> TS CLI Router -> Python Agent/Model Runner -> State Persist -> Transcript
