@@ -64,6 +64,12 @@ import {
   runStructuredPrompt,
   type StructuredRunner
 } from "../story/structured-run.js";
+import {
+  commitStoryEvent,
+  compileStoryChapters,
+  renderStoryChapters,
+  runStoryCi
+} from "../story/simulation.js";
 import type { StoryLibraryEntry, StoryProject } from "../story/types.js";
 import { AppShell } from "./AppShell.js";
 import type {
@@ -871,6 +877,339 @@ export function App({
     });
   };
 
+  const formatCiReportSummary = (project: StoryProject): string => {
+    const latest = project.ciHistory[project.ciHistory.length - 1];
+
+    if (!latest) {
+      return "CI not run yet.";
+    }
+
+    return `CI ${latest.passed ? "pass" : "fail"} (${latest.errors.length} error(s), ${latest.warnings.length} warning(s))`;
+  };
+
+  const runStoryCommitCommand = async (
+    runId: number,
+    baseProject: StoryProject,
+    command: {
+      chapterId: string;
+      eventText: string;
+      patchFilePath: string | null;
+      force: boolean;
+    },
+    model: string
+  ): Promise<void> => {
+    try {
+      const result = await commitStoryEvent({
+        cwd,
+        model,
+        project: baseProject,
+        chapterId: command.chapterId,
+        eventText: command.eventText,
+        patchFilePath: command.patchFilePath,
+        force: command.force,
+        runner: structuredRunner
+      });
+
+      if (storyTaskRunIdRef.current !== runId) {
+        return;
+      }
+
+      if (!result.ok) {
+        applyStateUpdate((activeState) => {
+          const response = `${result.message}`;
+
+          return setTransientNotice(
+            {
+              ...updateLatestTranscriptEntry(activeState, (entry) => ({
+                ...entry,
+                response,
+                rawResponse: response,
+                failed: true,
+                streaming: false
+              })),
+              pendingTask: null
+            },
+            "Story commit blocked by CI."
+          );
+        });
+        return;
+      }
+
+      applyStateUpdate((activeState) => {
+        const saveError = saveStoryProject(cwd, result.project, activeState.storyProjectId);
+        const response = buildStoryTranscriptResponse(
+          result.project,
+          "world",
+          saveError
+            ? `${result.message} Saved for this run, but story persistence failed: ${saveError}`
+            : `${result.message} ${formatCiReportSummary(result.project)}`,
+          activeState.storyProjectId,
+          syncStoryProjectList(activeState.storyProjects, activeState.storyProjectId, result.project)
+        );
+        const nextState = updateLatestTranscriptEntry(activeState, (entry) => ({
+          ...entry,
+          response,
+          rawResponse: response,
+          failed: false,
+          streaming: false
+        }));
+
+        return setTransientNotice(
+          {
+            ...nextState,
+            storyProject: result.project,
+            storyProjects: syncStoryProjectList(
+              nextState.storyProjects,
+              nextState.storyProjectId,
+              result.project
+            ),
+            activeStoryView: "world",
+            pendingTask: null
+          },
+          "Story commit applied."
+        );
+      });
+    } catch (error) {
+      if (storyTaskRunIdRef.current !== runId) {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      applyStateUpdate((activeState) =>
+        setTransientNotice(
+          {
+            ...updateLatestTranscriptEntry(activeState, (entry) => ({
+              ...entry,
+              response: `Story commit failed. ${message}`,
+              rawResponse: `Story commit failed. ${message}`,
+              failed: true,
+              streaming: false
+            })),
+            pendingTask: null
+          },
+          "Story commit failed."
+        )
+      );
+    }
+  };
+
+  const runStoryCiCommand = async (
+    runId: number,
+    baseProject: StoryProject,
+    scope: "all" | "commit",
+    commitId: string | null
+  ): Promise<void> => {
+    try {
+      const result = await runStoryCi({
+        project: baseProject,
+        scope,
+        commitId
+      });
+
+      if (storyTaskRunIdRef.current !== runId) {
+        return;
+      }
+
+      applyStateUpdate((activeState) => {
+        const saveError = saveStoryProject(cwd, result.project, activeState.storyProjectId);
+        const response = buildStoryTranscriptResponse(
+          result.project,
+          activeState.activeStoryView ?? "world",
+          saveError
+            ? `CI finished with ${result.report.passed ? "pass" : "fail"}. Persistence failed: ${saveError}`
+            : `CI finished with ${result.report.passed ? "pass" : "fail"} (${result.report.errors.length} error(s), ${result.report.warnings.length} warning(s)).`,
+          activeState.storyProjectId,
+          syncStoryProjectList(activeState.storyProjects, activeState.storyProjectId, result.project)
+        );
+        const nextState = updateLatestTranscriptEntry(activeState, (entry) => ({
+          ...entry,
+          response,
+          rawResponse: response,
+          failed: !result.report.passed,
+          streaming: false
+        }));
+
+        return setTransientNotice(
+          {
+            ...nextState,
+            storyProject: result.project,
+            storyProjects: syncStoryProjectList(
+              nextState.storyProjects,
+              nextState.storyProjectId,
+              result.project
+            ),
+            pendingTask: null
+          },
+          result.report.passed ? "CI passed." : "CI failed."
+        );
+      });
+    } catch (error) {
+      if (storyTaskRunIdRef.current !== runId) {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      applyStateUpdate((activeState) =>
+        setTransientNotice(
+          {
+            ...updateLatestTranscriptEntry(activeState, (entry) => ({
+              ...entry,
+              response: `CI run failed. ${message}`,
+              rawResponse: `CI run failed. ${message}`,
+              failed: true,
+              streaming: false
+            })),
+            pendingTask: null
+          },
+          "CI run failed."
+        )
+      );
+    }
+  };
+
+  const runStoryRenderCommand = async (
+    runId: number,
+    baseProject: StoryProject,
+    command: {
+      chapterIds: string[];
+      force: boolean;
+      style: string | null;
+    },
+    model: string
+  ): Promise<void> => {
+    try {
+      const result = await renderStoryChapters({
+        cwd,
+        model,
+        project: baseProject,
+        chapterIds: command.chapterIds,
+        style: command.style,
+        force: command.force,
+        runner: structuredRunner
+      });
+
+      if (storyTaskRunIdRef.current !== runId) {
+        return;
+      }
+
+      applyStateUpdate((activeState) => {
+        const saveError = saveStoryProject(cwd, result.project, activeState.storyProjectId);
+        const renderedLabel = result.rendered.length > 0 ? result.rendered.join(", ") : "none";
+        const skippedLabel = result.skipped.length > 0 ? result.skipped.join(", ") : "none";
+        const response = buildStoryTranscriptResponse(
+          result.project,
+          activeState.activeStoryView ?? "world",
+          saveError
+            ? `Render finished (rendered: ${renderedLabel}; skipped: ${skippedLabel}). Persistence failed: ${saveError}`
+            : `Render finished (rendered: ${renderedLabel}; skipped: ${skippedLabel}).`,
+          activeState.storyProjectId,
+          syncStoryProjectList(activeState.storyProjects, activeState.storyProjectId, result.project)
+        );
+        const nextState = updateLatestTranscriptEntry(activeState, (entry) => ({
+          ...entry,
+          response,
+          rawResponse: response,
+          failed: false,
+          streaming: false
+        }));
+
+        return setTransientNotice(
+          {
+            ...nextState,
+            storyProject: result.project,
+            storyProjects: syncStoryProjectList(
+              nextState.storyProjects,
+              nextState.storyProjectId,
+              result.project
+            ),
+            pendingTask: null
+          },
+          "Render completed."
+        );
+      });
+    } catch (error) {
+      if (storyTaskRunIdRef.current !== runId) {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      applyStateUpdate((activeState) =>
+        setTransientNotice(
+          {
+            ...updateLatestTranscriptEntry(activeState, (entry) => ({
+              ...entry,
+              response: `Render failed. ${message}`,
+              rawResponse: `Render failed. ${message}`,
+              failed: true,
+              streaming: false
+            })),
+            pendingTask: null
+          },
+          "Render failed."
+        )
+      );
+    }
+  };
+
+  const runStoryCompileCommand = async (
+    runId: number,
+    baseProject: StoryProject,
+    command: {
+      chapterIds: string[];
+      outputPath: string | null;
+    }
+  ): Promise<void> => {
+    try {
+      const result = compileStoryChapters({
+        cwd,
+        project: baseProject,
+        chapterIds: command.chapterIds,
+        outputPath: command.outputPath
+      });
+
+      if (storyTaskRunIdRef.current !== runId) {
+        return;
+      }
+
+      applyStateUpdate((activeState) =>
+        setTransientNotice(
+          {
+            ...updateLatestTranscriptEntry(activeState, (entry) => ({
+              ...entry,
+              response: `Compiled chapters: ${result.compiledChapters.join(", ") || "none"}\nMissing chapters: ${result.missingChapters.join(", ") || "none"}\nOutput: ${path.relative(cwd, result.outputPath) || result.outputPath}`,
+              rawResponse: `Compiled chapters: ${result.compiledChapters.join(", ") || "none"}\nMissing chapters: ${result.missingChapters.join(", ") || "none"}\nOutput: ${path.relative(cwd, result.outputPath) || result.outputPath}`,
+              failed: false,
+              streaming: false
+            })),
+            pendingTask: null
+          },
+          "Compile completed."
+        )
+      );
+    } catch (error) {
+      if (storyTaskRunIdRef.current !== runId) {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      applyStateUpdate((activeState) =>
+        setTransientNotice(
+          {
+            ...updateLatestTranscriptEntry(activeState, (entry) => ({
+              ...entry,
+              response: `Compile failed. ${message}`,
+              rawResponse: `Compile failed. ${message}`,
+              failed: true,
+              streaming: false
+            })),
+            pendingTask: null
+          },
+          "Compile failed."
+        )
+      );
+    }
+  };
+
   const handlePlainPromptSubmit = (currentState: AppState, now: number): AppState => {
     const prompt = currentState.inputValue.trim();
 
@@ -1244,6 +1583,287 @@ export function App({
             storyResult.activeView,
             storyResult.message
           ),
+          shouldExit: false
+        };
+      }
+
+      if (storyResult.type === "commit") {
+        const storyProject = currentState.storyProject;
+
+        if (!storyProject) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "Run /init first to create a story project.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+
+        const currentConnection = currentState.config.connection;
+        const currentModel = currentState.config.model;
+
+        if (!storyResult.patchFilePath) {
+          if (!currentConnection) {
+            return {
+              nextState: setTransientNotice(clearInputValue(currentState), "Run /connect first.", now),
+              shouldExit: false
+            };
+          }
+
+          if (!currentModel) {
+            return {
+              nextState: setTransientNotice(clearInputValue(currentState), "Run /models first.", now),
+              shouldExit: false
+            };
+          }
+
+          const syncError = primeConnectionForRun(currentConnection);
+
+          if (syncError) {
+            return {
+              nextState: setTransientNotice(
+                clearInputValue(currentState),
+                `Credential sync failed before commit: ${syncError}`,
+                now
+              ),
+              shouldExit: false
+            };
+          }
+        }
+
+        const modelForCommit = currentModel ?? "deepseek/deepseek-chat";
+        const storyRunId = storyTaskRunIdRef.current + 1;
+        storyTaskRunIdRef.current = storyRunId;
+        const pendingEntry: TranscriptEntry = {
+          id: `story-commit-${Date.now()}-${storyRunId}`,
+          prompt: commandPrompt,
+          response: storyResult.message,
+          provider: currentConnection?.provider ?? "storyforge",
+          model: modelForCommit,
+          failed: false,
+          rawResponse: storyResult.message,
+          streaming: false
+        };
+        const nextState = appendTranscriptEntry(
+          setTransientNotice(
+            {
+              ...clearInputValue(currentState),
+              pendingTask: {
+                kind: "story-commit",
+                stage: storyResult.chapterId
+              }
+            },
+            storyResult.message,
+            now
+          ),
+          pendingEntry
+        );
+
+        void runStoryCommitCommand(
+          storyRunId,
+          storyProject,
+          {
+            chapterId: storyResult.chapterId,
+            eventText: storyResult.eventText,
+            patchFilePath: storyResult.patchFilePath,
+            force: storyResult.force
+          },
+          modelForCommit
+        );
+
+        return {
+          nextState,
+          shouldExit: false
+        };
+      }
+
+      if (storyResult.type === "ci") {
+        const storyProject = currentState.storyProject;
+
+        if (!storyProject) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "Run /init first to create a story project.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+
+        const storyRunId = storyTaskRunIdRef.current + 1;
+        storyTaskRunIdRef.current = storyRunId;
+        const pendingEntry: TranscriptEntry = {
+          id: `story-ci-${Date.now()}-${storyRunId}`,
+          prompt: commandPrompt,
+          response: storyResult.message,
+          provider: "storyforge",
+          model: "story/ci",
+          failed: false,
+          rawResponse: storyResult.message,
+          streaming: false
+        };
+        const nextState = appendTranscriptEntry(
+          setTransientNotice(
+            {
+              ...clearInputValue(currentState),
+              pendingTask: {
+                kind: "story-ci",
+                stage: storyResult.scope
+              }
+            },
+            storyResult.message,
+            now
+          ),
+          pendingEntry
+        );
+
+        void runStoryCiCommand(storyRunId, storyProject, storyResult.scope, storyResult.commitId);
+
+        return {
+          nextState,
+          shouldExit: false
+        };
+      }
+
+      if (storyResult.type === "render") {
+        const storyProject = currentState.storyProject;
+
+        if (!storyProject) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "Run /init first to create a story project.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+
+        const currentConnection = currentState.config.connection;
+        const currentModel = currentState.config.model;
+
+        if (!currentConnection) {
+          return {
+            nextState: setTransientNotice(clearInputValue(currentState), "Run /connect first.", now),
+            shouldExit: false
+          };
+        }
+
+        if (!currentModel) {
+          return {
+            nextState: setTransientNotice(clearInputValue(currentState), "Run /models first.", now),
+            shouldExit: false
+          };
+        }
+
+        const syncError = primeConnectionForRun(currentConnection);
+
+        if (syncError) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              `Credential sync failed before render: ${syncError}`,
+              now
+            ),
+            shouldExit: false
+          };
+        }
+
+        const storyRunId = storyTaskRunIdRef.current + 1;
+        storyTaskRunIdRef.current = storyRunId;
+        const pendingEntry: TranscriptEntry = {
+          id: `story-render-${Date.now()}-${storyRunId}`,
+          prompt: commandPrompt,
+          response: storyResult.message,
+          provider: currentConnection.provider,
+          model: currentModel,
+          failed: false,
+          rawResponse: storyResult.message,
+          streaming: false
+        };
+        const nextState = appendTranscriptEntry(
+          setTransientNotice(
+            {
+              ...clearInputValue(currentState),
+              pendingTask: {
+                kind: "story-render",
+                stage: storyResult.chapterIds.join(",")
+              }
+            },
+            storyResult.message,
+            now
+          ),
+          pendingEntry
+        );
+
+        void runStoryRenderCommand(
+          storyRunId,
+          storyProject,
+          {
+            chapterIds: storyResult.chapterIds,
+            force: storyResult.force,
+            style: storyResult.style
+          },
+          currentModel
+        );
+
+        return {
+          nextState,
+          shouldExit: false
+        };
+      }
+
+      if (storyResult.type === "compile") {
+        const storyProject = currentState.storyProject;
+
+        if (!storyProject) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "Run /init first to create a story project.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+
+        const storyRunId = storyTaskRunIdRef.current + 1;
+        storyTaskRunIdRef.current = storyRunId;
+        const pendingEntry: TranscriptEntry = {
+          id: `story-compile-${Date.now()}-${storyRunId}`,
+          prompt: commandPrompt,
+          response: storyResult.message,
+          provider: "storyforge",
+          model: "story/compile",
+          failed: false,
+          rawResponse: storyResult.message,
+          streaming: false
+        };
+        const nextState = appendTranscriptEntry(
+          setTransientNotice(
+            {
+              ...clearInputValue(currentState),
+              pendingTask: {
+                kind: "story-compile",
+                stage: storyResult.chapterIds.join(",")
+              }
+            },
+            storyResult.message,
+            now
+          ),
+          pendingEntry
+        );
+
+        void runStoryCompileCommand(storyRunId, storyProject, {
+          chapterIds: storyResult.chapterIds,
+          outputPath: storyResult.outputPath
+        });
+
+        return {
+          nextState,
           shouldExit: false
         };
       }

@@ -42,7 +42,7 @@ export function CommandPreview({
       borderColor={themeTokens.textSecondary}
       paddingX={1}
     >
-      {items.slice(0, 8).map((item, index) => {
+      {items.map((item, index) => {
         const isSelected = index === Math.min(selectedIndex, items.length - 1);
 
         return (

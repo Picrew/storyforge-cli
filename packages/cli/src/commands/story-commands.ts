@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { createBlankStoryProject } from "../story/project-store.js";
+import {
+  compareChapterIds,
+  normalizeChapterId,
+  parseChapterRange
+} from "../story/chapter-id.js";
 import type {
   ChapterPlan,
   CharacterProfile,
@@ -65,6 +70,37 @@ export interface StoryCommandOpenResult {
   projectId: string;
 }
 
+export interface StoryCommandCommitResult {
+  type: "commit";
+  message: string;
+  chapterId: string;
+  eventText: string;
+  patchFilePath: string | null;
+  force: boolean;
+}
+
+export interface StoryCommandCiResult {
+  type: "ci";
+  message: string;
+  scope: "all" | "commit";
+  commitId: string | null;
+}
+
+export interface StoryCommandRenderResult {
+  type: "render";
+  message: string;
+  chapterIds: string[];
+  force: boolean;
+  style: string | null;
+}
+
+export interface StoryCommandCompileResult {
+  type: "compile";
+  message: string;
+  chapterIds: string[];
+  outputPath: string | null;
+}
+
 export interface StoryCommandUnhandledResult {
   type: "not-handled";
 }
@@ -77,6 +113,10 @@ export type StoryCommandResult =
   | StoryCommandRefreshResult
   | StoryCommandLibraryResult
   | StoryCommandOpenResult
+  | StoryCommandCommitResult
+  | StoryCommandCiResult
+  | StoryCommandRenderResult
+  | StoryCommandCompileResult
   | StoryCommandUnhandledResult;
 
 function cloneProject(project: StoryProject): StoryProject {
@@ -87,7 +127,42 @@ function cloneProject(project: StoryProject): StoryProject {
     world: { ...project.world },
     characters: project.characters.map((entry) => ({ ...entry })),
     timeline: project.timeline.map((entry) => ({ ...entry })),
-    outline: project.outline.map((entry) => ({ ...entry }))
+    outline: project.outline.map((entry) => ({ ...entry })),
+    eventCommits: project.eventCommits.map((entry) => ({
+      ...entry,
+      patchOps: entry.patchOps.map((op) => ({
+        ...op,
+        payload: { ...op.payload }
+      })),
+      reads: [...entry.reads],
+      writes: [...entry.writes],
+      ciReport: entry.ciReport
+        ? {
+            ...entry.ciReport,
+            errors: entry.ciReport.errors.map((issue) => ({ ...issue })),
+            warnings: entry.ciReport.warnings.map((issue) => ({ ...issue }))
+          }
+        : null
+    })),
+    inventory: project.inventory.map((item) => ({
+      ...item,
+      holders: { ...item.holders }
+    })),
+    foreshadows: project.foreshadows.map((entry) => ({ ...entry })),
+    dependencyGraph: {
+      updatedAt: project.dependencyGraph.updatedAt,
+      edges: project.dependencyGraph.edges.map((edge) => ({ ...edge }))
+    },
+    chapterRenders: project.chapterRenders.map((entry) => ({
+      ...entry,
+      commitIds: [...entry.commitIds]
+    })),
+    ciHistory: project.ciHistory.map((entry) => ({
+      ...entry,
+      errors: entry.errors.map((issue) => ({ ...issue })),
+      warnings: entry.warnings.map((issue) => ({ ...issue }))
+    })),
+    dirtyChapters: [...project.dirtyChapters]
   };
 }
 
@@ -144,6 +219,49 @@ function parseRow(value: string | undefined): number | null {
 
 function getRest(args: string[], startIndex: number): string {
   return args.slice(startIndex).join(" ").trim();
+}
+
+interface ParsedCommandFlags {
+  positional: string[];
+  booleanFlags: Set<string>;
+  valueFlags: Map<string, string>;
+}
+
+function parseCommandFlags(args: readonly string[]): ParsedCommandFlags {
+  const positional: string[] = [];
+  const booleanFlags = new Set<string>();
+  const valueFlags = new Map<string, string>();
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (!token.startsWith("--")) {
+      positional.push(token);
+      continue;
+    }
+
+    const flagName = token.slice(2).toLowerCase();
+
+    if (!flagName) {
+      continue;
+    }
+
+    const nextToken = args[index + 1];
+
+    if (!nextToken || nextToken.startsWith("--")) {
+      booleanFlags.add(flagName);
+      continue;
+    }
+
+    valueFlags.set(flagName, nextToken);
+    index += 1;
+  }
+
+  return {
+    positional,
+    booleanFlags,
+    valueFlags
+  };
 }
 
 function createBlankCharacter(name: string): CharacterProfile {
@@ -315,6 +433,105 @@ function buildProjectLibraryResponse(
   });
 
   return [`${projects.length} saved story project(s).`, ...lines].join("\n");
+}
+
+function getKnownChapterIds(project: StoryProject): string[] {
+  const chapterIds = new Set<string>();
+
+  for (const chapter of project.outline) {
+    chapterIds.add(`ch${String(Math.max(1, chapter.number)).padStart(2, "0")}`);
+  }
+
+  for (const commit of project.eventCommits) {
+    const chapterId = normalizeChapterId(commit.chapterId);
+
+    if (chapterId) {
+      chapterIds.add(chapterId);
+    }
+  }
+
+  for (const chapterId of project.dirtyChapters) {
+    const normalized = normalizeChapterId(chapterId);
+
+    if (normalized) {
+      chapterIds.add(normalized);
+    }
+  }
+
+  for (const render of project.chapterRenders) {
+    const chapterId = normalizeChapterId(render.chapterId);
+
+    if (chapterId) {
+      chapterIds.add(chapterId);
+    }
+  }
+
+  return [...chapterIds].sort(compareChapterIds);
+}
+
+function buildStoryStatusResponse(project: StoryProject): string {
+  const openForeshadows = project.foreshadows.filter((entry) => entry.status !== "resolved");
+  const ciFailedCount = project.ciHistory.filter((entry) => !entry.passed).length;
+  const inventoryErrors = project.ciHistory
+    .flatMap((entry) => entry.errors)
+    .filter((issue) => issue.rule === "inventory_conservation").length;
+
+  const lines = [
+    `Story: ${project.meta.title}`,
+    `Commits: ${project.eventCommits.length}`,
+    `Dirty chapters: ${project.dirtyChapters.length > 0 ? project.dirtyChapters.join(", ") : "none"}`,
+    `Open foreshadows: ${openForeshadows.length}`,
+    `Inventory issues (recent CI history): ${inventoryErrors}`,
+    `CI failed runs: ${ciFailedCount}`,
+    `Last CI: ${project.ciHistory[project.ciHistory.length - 1]?.ranAt ?? "never"}`
+  ];
+
+  return lines.join("\n");
+}
+
+function buildStoryLogResponse(
+  project: StoryProject,
+  options: {
+    chapterId: string | null;
+    limit: number;
+    visual: boolean;
+  }
+): string {
+  const commits = options.chapterId
+    ? project.eventCommits.filter((entry) => normalizeChapterId(entry.chapterId) === options.chapterId)
+    : project.eventCommits;
+  const visibleCommits = commits.slice(-Math.max(1, options.limit));
+
+  const lines: string[] = [];
+
+  if (visibleCommits.length === 0) {
+    lines.push("No event commits yet.");
+  } else {
+    lines.push(`Showing ${visibleCommits.length} commit(s).`);
+
+    for (const entry of visibleCommits) {
+      lines.push(
+        `${entry.id.slice(0, 8)} | ${entry.chapterId} | ${entry.ciPassed ? "ci:pass" : "ci:fail"} | ${entry.message}`
+      );
+      lines.push(`reads: ${entry.reads.join(", ") || "-"}`);
+      lines.push(`writes: ${entry.writes.join(", ") || "-"}`);
+    }
+  }
+
+  if (options.visual) {
+    lines.push("");
+    lines.push("Dependency graph:");
+
+    if (project.dependencyGraph.edges.length === 0) {
+      lines.push("(empty)");
+    } else {
+      for (const edge of project.dependencyGraph.edges) {
+        lines.push(`${edge.from} -> ${edge.to} [${edge.key}]`);
+      }
+    }
+  }
+
+  return lines.join("\n");
 }
 
 export function handleStoryCommand(
@@ -681,6 +898,205 @@ export function handleStoryCommand(
       return {
         type: "notice",
         message: "Usage: /outline | /outline set <row> <field> <value...> | /outline rm <row>"
+      };
+    }
+
+    case "/commit": {
+      if (!context.currentProject) {
+        return {
+          type: "notice",
+          message: "Run /init first to create a story project."
+        };
+      }
+
+      const parsed = parseCommandFlags(parsedCommand.args);
+      const chapterId = normalizeChapterId(parsed.valueFlags.get("chapter") ?? "");
+      const patchFilePath = parsed.valueFlags.get("patch-file")?.trim() || null;
+      const force = parsed.booleanFlags.has("force");
+      const eventText = parsed.positional.join(" ").trim();
+
+      if (!chapterId) {
+        return {
+          type: "notice",
+          message: "Usage: /commit --chapter chNN <event_text> [--force] | /commit --chapter chNN --patch-file <json_path>"
+        };
+      }
+
+      if (!patchFilePath && !eventText) {
+        return {
+          type: "notice",
+          message: "Event text is required when --patch-file is not provided."
+        };
+      }
+
+      return {
+        type: "commit",
+        message: `Committing event patch for ${chapterId}...`,
+        chapterId,
+        eventText,
+        patchFilePath,
+        force
+      };
+    }
+
+    case "/status": {
+      if (!context.currentProject) {
+        return {
+          type: "notice",
+          message: "Run /init first to create a story project."
+        };
+      }
+
+      if (parsedCommand.args.length > 0) {
+        return {
+          type: "notice",
+          message: "Usage: /status"
+        };
+      }
+
+      return {
+        type: "library",
+        message: "Story health snapshot.",
+        response: buildStoryStatusResponse(context.currentProject)
+      };
+    }
+
+    case "/log": {
+      if (!context.currentProject) {
+        return {
+          type: "notice",
+          message: "Run /init first to create a story project."
+        };
+      }
+
+      const parsed = parseCommandFlags(parsedCommand.args);
+      const chapterIdRaw = parsed.valueFlags.get("chapter");
+      const chapterId = chapterIdRaw ? normalizeChapterId(chapterIdRaw) : null;
+      const limitRaw = parsed.valueFlags.get("limit");
+      const limit = limitRaw ? Number.parseInt(limitRaw, 10) : 20;
+
+      if (chapterIdRaw && !chapterId) {
+        return {
+          type: "notice",
+          message: "Usage: /log [--chapter chNN] [--limit N] [--visual]"
+        };
+      }
+
+      if (!Number.isFinite(limit) || limit < 1) {
+        return {
+          type: "notice",
+          message: "Log limit must be a positive integer."
+        };
+      }
+
+      return {
+        type: "library",
+        message: "Story event log.",
+        response: buildStoryLogResponse(context.currentProject, {
+          chapterId,
+          limit,
+          visual: parsed.booleanFlags.has("visual")
+        })
+      };
+    }
+
+    case "/ci": {
+      if (!context.currentProject) {
+        return {
+          type: "notice",
+          message: "Run /init first to create a story project."
+        };
+      }
+
+      if (parsedCommand.args[0] !== "run") {
+        return {
+          type: "notice",
+          message: "Usage: /ci run [--all|--commit <id>]"
+        };
+      }
+
+      const parsed = parseCommandFlags(parsedCommand.args.slice(1));
+      const commitId = parsed.valueFlags.get("commit")?.trim() || null;
+
+      if (parsed.booleanFlags.has("all") && commitId) {
+        return {
+          type: "notice",
+          message: "Choose either --all or --commit <id>, not both."
+        };
+      }
+
+      return {
+        type: "ci",
+        message: "Running story CI...",
+        scope: commitId ? "commit" : "all",
+        commitId
+      };
+    }
+
+    case "/render": {
+      if (!context.currentProject) {
+        return {
+          type: "notice",
+          message: "Run /init first to create a story project."
+        };
+      }
+
+      const parsed = parseCommandFlags(parsedCommand.args);
+
+      if (parsed.positional.length !== 1) {
+        return {
+          type: "notice",
+          message: "Usage: /render <chNN|chNN..chMM|all> [--force] [--style <name>]"
+        };
+      }
+
+      const rangeToken = parsed.positional[0].toLowerCase();
+      const chapterIds = rangeToken === "all"
+        ? getKnownChapterIds(context.currentProject)
+        : parseChapterRange(rangeToken);
+
+      if (!chapterIds || chapterIds.length === 0) {
+        return {
+          type: "notice",
+          message: "Render range is invalid."
+        };
+      }
+
+      return {
+        type: "render",
+        message: `Rendering ${chapterIds.length} chapter(s)...`,
+        chapterIds,
+        force: parsed.booleanFlags.has("force"),
+        style: parsed.valueFlags.get("style")?.trim() || null
+      };
+    }
+
+    case "/compile": {
+      if (!context.currentProject) {
+        return {
+          type: "notice",
+          message: "Run /init first to create a story project."
+        };
+      }
+
+      const parsed = parseCommandFlags(parsedCommand.args);
+      const rangeToken = parsed.positional[0]?.toLowerCase() ?? "all";
+      const chapterIds = rangeToken === "all"
+        ? getKnownChapterIds(context.currentProject)
+        : parseChapterRange(rangeToken);
+
+      if (!chapterIds || chapterIds.length === 0) {
+        return {
+          type: "notice",
+          message: "Compile range is invalid."
+        };
+      }
+
+      return {
+        type: "compile",
+        message: `Compiling ${chapterIds.length} chapter(s)...`,
+        chapterIds,
+        outputPath: parsed.valueFlags.get("output")?.trim() || null
       };
     }
 

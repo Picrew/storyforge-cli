@@ -151,6 +151,111 @@ Behavior:
 - `/outline set <row> <field> <value...>` updates a chapter row by 1-based index
 - `/outline rm <row>` removes a chapter row
 
+## `/commit`
+
+Commit one chapter event patch into the structured world state.
+
+Examples:
+
+```text
+/commit --chapter ch03 Mira finds the coded ledger in the basement
+/commit --chapter ch03 --patch-file ./patches/ch03.json
+/commit --chapter ch03 Mira finds the coded ledger --force
+```
+
+Behavior:
+
+- `--chapter` is required and must be `chNN` format
+- with plain event text, Storyforge plans a structured event patch through the current model
+- with `--patch-file`, Storyforge loads patch JSON directly
+- deterministic CI runs after patch application
+- CI failures block persistence by default, unless `--force` is used
+
+## `/status`
+
+Show the narrative health summary.
+
+Examples:
+
+```text
+/status
+```
+
+Behavior:
+
+- reports commit count, dirty chapters, open foreshadows, and CI health snapshot
+
+## `/log`
+
+Show event commit history and optional dependency graph.
+
+Examples:
+
+```text
+/log
+/log --chapter ch03 --limit 10
+/log --visual
+```
+
+Behavior:
+
+- prints commit timeline with read/write dimensions
+- `--chapter` filters by chapter id
+- `--limit` controls the number of visible entries
+- `--visual` appends text DAG edges from dependency graph
+
+## `/ci`
+
+Run deterministic story CI checks.
+
+Examples:
+
+```text
+/ci run
+/ci run --all
+/ci run --commit 1a2b3c4d
+```
+
+Behavior:
+
+- executes timeline monotonicity, entity existence, inventory conservation, and foreshadow due checks
+- writes report into project CI history
+
+## `/render`
+
+Render chapter prose from current world state snapshot and chapter patches.
+
+Examples:
+
+```text
+/render ch03
+/render ch01..ch05 --style hardboiled
+/render all --force
+```
+
+Behavior:
+
+- renders only dirty chapters by default
+- `--force` rerenders even clean chapters
+- writes chapter markdown files to `./.storyforge/chapters/chNN.md`
+
+## `/compile`
+
+Compile rendered chapter files into one manuscript.
+
+Examples:
+
+```text
+/compile all
+/compile ch01..ch10 --output .storyforge/manuscript/story.md
+```
+
+Behavior:
+
+- concatenates rendered chapter markdown in chapter order
+- default output is `./.storyforge/manuscript/story.md`
+- does not call a model
+
 ## `/exit`
 
 Exit the app.

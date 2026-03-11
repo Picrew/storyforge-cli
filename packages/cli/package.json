@@ -10,7 +10,8 @@
     "storyforge": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "story_agent.py"
   ],
   "scripts": {
     "dev": "tsx src/index.tsx",
