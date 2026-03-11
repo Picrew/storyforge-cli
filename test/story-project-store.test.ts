@@ -26,7 +26,7 @@ describe("story project store", () => {
 
     expect(createResult.error).toBeNull();
     expect(project).toEqual({
-      version: 1,
+      version: 2,
       meta: {
         title: "Untitled Story",
         status: "empty",
@@ -51,7 +51,17 @@ describe("story project store", () => {
       },
       characters: [],
       timeline: [],
-      outline: []
+      outline: [],
+      eventCommits: [],
+      inventory: [],
+      foreshadows: [],
+      dependencyGraph: {
+        edges: [],
+        updatedAt: "2026-03-04T00:00:00.000Z"
+      },
+      chapterRenders: [],
+      ciHistory: [],
+      dirtyChapters: []
     });
     expect(workspace.activeProjectId).toBe(createResult.projectId);
     expect(workspace.projects).toHaveLength(1);
@@ -75,6 +85,52 @@ describe("story project store", () => {
     fs.writeFileSync(projectPath, "{not json}\n", "utf8");
 
     expect(() => loadStoryProject(cwd)).toThrow();
+  });
+
+  it("auto-migrates a legacy v1 project into v2 fields", () => {
+    const cwd = makeTempDir();
+    const legacyPath = getStoryProjectPath(cwd);
+    const legacyProject = {
+      version: 1,
+      meta: {
+        title: "Legacy Story",
+        status: "ready",
+        createdAt: "2026-03-04T00:00:00.000Z",
+        updatedAt: "2026-03-04T00:00:00.000Z"
+      },
+      brief: {
+        seedPrompt: "legacy prompt",
+        genre: "mystery",
+        targetWords: 1500,
+        language: "English",
+        tone: "tense",
+        premise: "legacy premise"
+      },
+      world: {
+        premise: "legacy world",
+        setting: "city",
+        tone: "noir",
+        rules: "strict",
+        stakes: "high",
+        resolutionShape: "twist"
+      },
+      characters: [],
+      timeline: [],
+      outline: []
+    };
+
+    fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+    fs.writeFileSync(legacyPath, `${JSON.stringify(legacyProject, null, 2)}\n`, "utf8");
+
+    const loaded = loadStoryProject(cwd);
+
+    expect(loaded?.version).toBe(2);
+    expect(loaded?.meta.title).toBe("Legacy Story");
+    expect(loaded?.world.premise).toBe("legacy world");
+    expect(loaded?.eventCommits).toEqual([]);
+    expect(loaded?.inventory).toEqual([]);
+    expect(loaded?.foreshadows).toEqual([]);
+    expect(loaded?.chapterRenders).toEqual([]);
   });
 
   it("preserves prior generated sections when the project is saved again", () => {

@@ -6,6 +6,12 @@ export interface CommandPreviewItem {
     | "models"
     | "init"
     | "projects"
+    | "commit"
+    | "status"
+    | "log"
+    | "ci"
+    | "render"
+    | "compile"
     | "world"
     | "characters"
     | "timeline"
@@ -36,6 +42,36 @@ const commandPreviewItems: readonly CommandPreviewItem[] = [
     description: "List or open saved story projects",
     action: "projects",
     aliases: ["/project"]
+  },
+  {
+    command: "/commit",
+    description: "Commit event patch into world state",
+    action: "commit"
+  },
+  {
+    command: "/status",
+    description: "Show narrative health metrics",
+    action: "status"
+  },
+  {
+    command: "/log",
+    description: "Show event timeline and dependencies",
+    action: "log"
+  },
+  {
+    command: "/ci",
+    description: "Run deterministic story CI checks",
+    action: "ci"
+  },
+  {
+    command: "/render",
+    description: "Render chapter text from state snapshot",
+    action: "render"
+  },
+  {
+    command: "/compile",
+    description: "Compile rendered chapters into manuscript",
+    action: "compile"
   },
   {
     command: "/world",

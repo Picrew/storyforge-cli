@@ -91,7 +91,42 @@ function cloneProject(project: StoryProject): StoryProject {
     world: { ...project.world },
     characters: project.characters.map((entry) => ({ ...entry })),
     timeline: project.timeline.map((entry) => ({ ...entry })),
-    outline: project.outline.map((entry) => ({ ...entry }))
+    outline: project.outline.map((entry) => ({ ...entry })),
+    eventCommits: project.eventCommits.map((entry) => ({
+      ...entry,
+      patchOps: entry.patchOps.map((op) => ({
+        ...op,
+        payload: { ...op.payload }
+      })),
+      reads: [...entry.reads],
+      writes: [...entry.writes],
+      ciReport: entry.ciReport
+        ? {
+            ...entry.ciReport,
+            errors: entry.ciReport.errors.map((issue) => ({ ...issue })),
+            warnings: entry.ciReport.warnings.map((issue) => ({ ...issue }))
+          }
+        : null
+    })),
+    inventory: project.inventory.map((item) => ({
+      ...item,
+      holders: { ...item.holders }
+    })),
+    foreshadows: project.foreshadows.map((entry) => ({ ...entry })),
+    dependencyGraph: {
+      updatedAt: project.dependencyGraph.updatedAt,
+      edges: project.dependencyGraph.edges.map((edge) => ({ ...edge }))
+    },
+    chapterRenders: project.chapterRenders.map((entry) => ({
+      ...entry,
+      commitIds: [...entry.commitIds]
+    })),
+    ciHistory: project.ciHistory.map((entry) => ({
+      ...entry,
+      errors: entry.errors.map((issue) => ({ ...issue })),
+      warnings: entry.warnings.map((issue) => ({ ...issue }))
+    })),
+    dirtyChapters: [...project.dirtyChapters]
   };
 }
 

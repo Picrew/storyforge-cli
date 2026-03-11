@@ -28,6 +28,7 @@ Storyforge now ships a terminal-first shell with a persisted story project layer
 - Storyforge then generates structured tables for:
   world state, characters, timeline beats, and chapter outline
 - story sections remain editable through command-driven updates
+- event-based world simulation and deterministic CI workflow
 
 ## Story Tables
 
@@ -38,6 +39,20 @@ Storyforge now ships a terminal-first shell with a persisted story project layer
 - `/init refresh` reruns all structured sections from the saved brief
 - `/init refresh world|char|timeline|outline` reruns one section only
 - story table snapshots are appended into transcript history, so earlier `/char` and `/timeline` views remain visible as you switch
+
+## Story Simulation
+
+- `/commit --chapter chNN <event...>` commits one structured event patch
+- deterministic CI blocks inconsistent commits by default
+- `/status` shows narrative health metrics
+- `/log` shows chapter event timeline and dependency graph edges
+- dependency tracking marks affected chapters as dirty for incremental rerendering
+
+## Rendering And Compilation
+
+- `/render chNN` or `/render chNN..chMM` renders prose from state snapshot + chapter patch
+- rendered chapters are persisted in `./.storyforge/chapters/`
+- `/compile` concatenates rendered chapters into a manuscript file
 
 ## Provider Setup
 
