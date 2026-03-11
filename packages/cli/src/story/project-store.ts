@@ -33,6 +33,10 @@ function asNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function asBoolean(value: unknown, fallback: boolean = false): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
 function normalizeStoryStatus(value: unknown): StoryLibraryEntry["status"] {
   return value === "awaiting_brief" ||
     value === "bootstrapping" ||
@@ -267,7 +271,7 @@ export function createBlankStoryProject(
   title: string = "Untitled Story"
 ): StoryProject {
   return {
-    version: 1,
+    version: 2,
     meta: {
       title,
       status: "empty",
@@ -292,7 +296,17 @@ export function createBlankStoryProject(
     },
     characters: [],
     timeline: [],
-    outline: []
+    outline: [],
+    eventCommits: [],
+    inventory: [],
+    foreshadows: [],
+    dependencyGraph: {
+      edges: [],
+      updatedAt: now
+    },
+    chapterRenders: [],
+    ciHistory: [],
+    dirtyChapters: []
   };
 }
 
@@ -309,9 +323,16 @@ export function normalizeStoryProject(value: unknown): StoryProject {
   const characters = Array.isArray(value.characters) ? value.characters : [];
   const timeline = Array.isArray(value.timeline) ? value.timeline : [];
   const outline = Array.isArray(value.outline) ? value.outline : [];
+  const eventCommits = Array.isArray(value.eventCommits) ? value.eventCommits : [];
+  const inventory = Array.isArray(value.inventory) ? value.inventory : [];
+  const foreshadows = Array.isArray(value.foreshadows) ? value.foreshadows : [];
+  const dependencyGraph = isObject(value.dependencyGraph) ? value.dependencyGraph : {};
+  const chapterRenders = Array.isArray(value.chapterRenders) ? value.chapterRenders : [];
+  const ciHistory = Array.isArray(value.ciHistory) ? value.ciHistory : [];
+  const dirtyChapters = Array.isArray(value.dirtyChapters) ? value.dirtyChapters : [];
 
   return {
-    version: 1,
+    version: 2,
     meta: {
       title: asString(meta.title, fallback.meta.title) || fallback.meta.title,
       status: normalizeStoryStatus(meta.status),
@@ -371,7 +392,157 @@ export function normalizeStoryProject(value: unknown): StoryProject {
         summary: asString(entry.summary),
         hook: asString(entry.hook),
         targetWords: asNullableNumber(entry.targetWords)
-      }))
+      })),
+    eventCommits: eventCommits
+      .filter(isObject)
+      .map((entry, index) => ({
+        id: asString(entry.id, `commit-${index + 1}`),
+        chapterId: asString(entry.chapterId, "ch01"),
+        createdAt: asString(entry.createdAt, fallback.meta.updatedAt),
+        message: asString(entry.message),
+        patchOps: Array.isArray(entry.patchOps)
+          ? entry.patchOps
+              .filter(isObject)
+              .map((op) => ({
+                op: asString(op.op),
+                target: asString(op.target),
+                payload: isObject(op.payload) ? op.payload : {}
+              }))
+          : [],
+        reads: Array.isArray(entry.reads)
+          ? entry.reads
+              .filter((token) => typeof token === "string")
+              .map((token) => token.trim())
+              .filter(Boolean)
+          : [],
+        writes: Array.isArray(entry.writes)
+          ? entry.writes
+              .filter((token) => typeof token === "string")
+              .map((token) => token.trim())
+              .filter(Boolean)
+          : [],
+        forced: asBoolean(entry.forced, false),
+        ciPassed: asBoolean(entry.ciPassed, false),
+        ciReport: isObject(entry.ciReport)
+          ? {
+              ranAt: asString(entry.ciReport.ranAt, fallback.meta.updatedAt),
+              scope: entry.ciReport.scope === "commit" ? "commit" : "all",
+              passed: asBoolean(entry.ciReport.passed, false),
+              errors: Array.isArray(entry.ciReport.errors)
+                ? entry.ciReport.errors
+                    .filter(isObject)
+                    .map((issue) => ({
+                      rule: asString(issue.rule),
+                      severity: "error" as const,
+                      message: asString(issue.message),
+                      chapterId: asString(issue.chapterId) || undefined,
+                      commitId: asString(issue.commitId) || undefined
+                    }))
+                : [],
+              warnings: Array.isArray(entry.ciReport.warnings)
+                ? entry.ciReport.warnings
+                    .filter(isObject)
+                    .map((issue) => ({
+                      rule: asString(issue.rule),
+                      severity: "warning" as const,
+                      message: asString(issue.message),
+                      chapterId: asString(issue.chapterId) || undefined,
+                      commitId: asString(issue.commitId) || undefined
+                    }))
+                : []
+            }
+          : null
+      })),
+    inventory: inventory
+      .filter(isObject)
+      .map((entry, index) => ({
+        id: asString(entry.id, `item-${index + 1}`),
+        name: asString(entry.name, `Item ${index + 1}`),
+        holders: isObject(entry.holders)
+          ? Object.fromEntries(
+              Object.entries(entry.holders)
+                .filter(([, qty]) => typeof qty === "number" && Number.isFinite(qty))
+                .map(([holder, qty]) => [holder, Math.max(0, Math.round(Number(qty)))])
+            )
+          : {},
+        total: typeof entry.total === "number" && Number.isFinite(entry.total)
+          ? Math.max(0, Math.round(entry.total))
+          : 0,
+        status: entry.status === "consumed" ? "consumed" : "active",
+        notes: asString(entry.notes)
+      })),
+    foreshadows: foreshadows
+      .filter(isObject)
+      .map((entry, index) => ({
+        id: asString(entry.id, `foreshadow-${index + 1}`),
+        label: asString(entry.label, `Foreshadow ${index + 1}`),
+        introducedChapter: asString(entry.introducedChapter, "ch01"),
+        dueChapter: asString(entry.dueChapter, "ch01"),
+        resolvedChapter: asString(entry.resolvedChapter) || null,
+        status: entry.status === "resolved" ? "resolved" : "open",
+        notes: asString(entry.notes)
+      })),
+    dependencyGraph: {
+      edges: Array.isArray(dependencyGraph.edges)
+        ? dependencyGraph.edges
+            .filter(isObject)
+            .map((edge) => ({
+              from: asString(edge.from),
+              to: asString(edge.to),
+              key: asString(edge.key)
+            }))
+            .filter((edge) => Boolean(edge.from && edge.to && edge.key))
+        : [],
+      updatedAt: asString(dependencyGraph.updatedAt, fallback.meta.updatedAt)
+    },
+    chapterRenders: chapterRenders
+      .filter(isObject)
+      .map((entry) => ({
+        chapterId: asString(entry.chapterId, "ch01"),
+        file: asString(entry.file),
+        renderedAt: asString(entry.renderedAt, fallback.meta.updatedAt),
+        model: asString(entry.model),
+        commitIds: Array.isArray(entry.commitIds)
+          ? entry.commitIds
+              .filter((id) => typeof id === "string")
+              .map((id) => id.trim())
+              .filter(Boolean)
+          : [],
+        dirty: asBoolean(entry.dirty, false)
+      })),
+    ciHistory: ciHistory
+      .filter(isObject)
+      .map((entry) => ({
+        ranAt: asString(entry.ranAt, fallback.meta.updatedAt),
+        scope: entry.scope === "commit" ? "commit" : "all",
+        passed: asBoolean(entry.passed, false),
+        errors: Array.isArray(entry.errors)
+          ? entry.errors
+              .filter(isObject)
+              .map((issue) => ({
+                rule: asString(issue.rule),
+                severity: "error" as const,
+                message: asString(issue.message),
+                chapterId: asString(issue.chapterId) || undefined,
+                commitId: asString(issue.commitId) || undefined
+              }))
+          : [],
+        warnings: Array.isArray(entry.warnings)
+          ? entry.warnings
+              .filter(isObject)
+              .map((issue) => ({
+                rule: asString(issue.rule),
+                severity: "warning" as const,
+                message: asString(issue.message),
+                chapterId: asString(issue.chapterId) || undefined,
+                commitId: asString(issue.commitId) || undefined
+              }))
+          : []
+      })),
+    dirtyChapters: dirtyChapters
+      .filter((chapter) => typeof chapter === "string")
+      .map((chapter) => chapter.trim())
+      .filter(Boolean)
   };
 }
 
