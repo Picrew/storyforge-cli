@@ -42,6 +42,12 @@ Current story commands:
 - `/char`
 - `/timeline`
 - `/outline`
+- `/commit`
+- `/status`
+- `/log`
+- `/ci run`
+- `/render`
+- `/compile`
 
 ### Story Domain Layer
 
@@ -54,6 +60,21 @@ The story domain lives in `packages/cli/src/story/`.
 - `bootstrap.ts`: staged story initialization and refresh pipeline
 
 This keeps the story workflow isolated from generic shell concerns.
+
+### Python Agent Layer
+
+Storyforge V2 introduces a local Python agent process:
+
+- `packages/cli/story_agent.py`
+
+The TypeScript app talks to this process via JSON stdin/stdout for:
+
+- `plan_patch`
+- `apply_patch`
+- `run_ci`
+- `build_impact`
+
+This isolates deterministic validation and impact analysis from UI command routing.
 
 ## Persistence Model
 
@@ -93,6 +114,13 @@ Each project file stores the structured story state:
 - `characters`
 - `timeline`
 - `outline`
+- `eventCommits`
+- `inventory`
+- `foreshadows`
+- `dependencyGraph`
+- `chapterRenders`
+- `ciHistory`
+- `dirtyChapters`
 
 This means one folder can now contain multiple separate novels without collisions.
 

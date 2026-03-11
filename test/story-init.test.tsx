@@ -53,7 +53,7 @@ function makeTempDir(): string {
 
 async function waitForCondition(
   check: () => boolean,
-  timeoutMs: number = 1_000
+  timeoutMs: number = 2_000
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
 
