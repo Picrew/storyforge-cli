@@ -26,6 +26,7 @@
     "link:global": "pnpm --dir packages/cli link --global",
     "unlink:global": "pnpm --dir packages/cli unlink --global",
     "typecheck": "pnpm --filter @storyforge/cli run typecheck",
-    "test": "pnpm --filter @storyforge/cli run test"
+    "test": "pnpm --filter @storyforge/cli run test",
+    "test:offline": "pnpm --filter @storyforge/cli run test:offline"
   }
 }
