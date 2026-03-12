@@ -86,6 +86,13 @@ describe("story agent CI rules", () => {
     expect(report.ci_report.errors).toHaveLength(0);
   });
 
+  it("treats null commit ids as latest commit in commit scope", async () => {
+    const report = await runCiWithAgent(createBaseProject(), "commit", null);
+
+    expect(report.ci_report.passed).toBe(true);
+    expect(report.ci_report.errors.some((issue) => issue.message.includes("Unknown commit id"))).toBe(false);
+  });
+
   it("flags timeline regressions", async () => {
     const project = createBaseProject();
 

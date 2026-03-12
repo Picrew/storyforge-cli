@@ -94,19 +94,20 @@ node packages/cli/dist/index.js
 
 ## 2. Runtime Requirements
 
-Even for packaged installs, you still need:
+For packaged installs (`.pkg` / `.dmg` / `tar.gz`), Storyforge includes a bundled Node runtime.
+You only need:
 
-- Node.js 20+
 - Python 3.10+
 - `opencode` in PATH
 
 Verify:
 
 ```bash
-node -v
 python3 --version
 opencode --version
 ```
+
+If you run from source (`pnpm dev`, `pnpm build`), Node.js 20+ is still required.
 
 ## 3. The 8 Working Modes For Beginners
 

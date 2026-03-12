@@ -83,6 +83,14 @@ pnpm build
 node packages/cli/dist/index.js
 ```
 
+### 构建安装包（macOS + Linux）
+
+```bash
+pnpm build:installers
+```
+
+安装包会输出到 `installers/v<version>/`。
+
 ## 一次典型 V2 会话
 
 ```text
