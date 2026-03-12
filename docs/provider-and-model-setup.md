@@ -23,6 +23,7 @@ API keys and managed `opencode` auth data are stored under:
 These providers use the credential-entry modal or `/connect <provider> <api-key>`:
 
 - `deepseek`
+- `openrouter`
 - `google`
 - `siliconflow-cn`
 - `kimi-for-coding`
