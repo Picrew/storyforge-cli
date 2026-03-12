@@ -126,6 +126,7 @@ pnpm test:offline
 - [Quickstart](./docs/quickstart.md)
 - [Feature Overview](./docs/feature-overview.md)
 - [Command Reference](./docs/command-reference.md)
+- [Bash Workflow And Architecture](./docs/bash-architecture.md)
 - [Architecture](./ARCHITECTURE.md)
 - [V2 Feature Framework (ASCII)](./docs/v2-feature-framework.txt)
 

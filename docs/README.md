@@ -15,6 +15,7 @@ The structure is intentionally lightweight, similar to CLI-first projects that k
 
 - [Feature Overview](./feature-overview.md): what the preview shell can do today.
 - [Command Reference](./command-reference.md): slash commands, prompt behavior, and keyboard controls.
+- [Bash Workflow And Architecture](./bash-architecture.md): feature map and serial/parallel batch-generation flow.
 
 ## Support
 

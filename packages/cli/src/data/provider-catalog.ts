@@ -93,6 +93,23 @@ const providerCatalog: readonly ProviderOption[] = [
     ]
   },
   {
+    id: "openrouter",
+    title: "OpenRouter",
+    subtitle: "API key",
+    group: "popular",
+    authKind: "api",
+    authLabel: "Saved in .storyforge",
+    credentialLabel: "API key",
+    credentialHelperText: "Enter saves to .storyforge and opens model picker.",
+    fallbackModels: [
+      {
+        id: "openrouter/stepfun/step-3.5-flash:free",
+        title: "stepfun/step-3.5-flash:free",
+        subtitle: "Fast free OpenRouter model"
+      }
+    ]
+  },
+  {
     id: "siliconflow-cn",
     title: "SiliconFlow (China)",
     subtitle: "API key",

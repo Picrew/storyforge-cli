@@ -13,45 +13,54 @@ function makeTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "storyforge-render-"));
 }
 
-function createProjectForRender() {
+function chapterIdFromNumber(chapterNumber: number): string {
+  return `ch${String(chapterNumber).padStart(2, "0")}`;
+}
+
+function createProjectForRender(chapterCount: number = 1) {
   const project = createBlankStoryProject("2026-03-12T00:00:00.000Z", "Render Story");
 
   project.meta.status = "ready";
   project.brief.seedPrompt = "A test story";
-  project.outline.push({
-    id: "outline-1",
-    number: 1,
-    title: "Chapter One",
-    purpose: "",
-    summary: "",
-    hook: "",
-    targetWords: 600
-  });
-  project.eventCommits.push({
-    id: "commit-1",
-    chapterId: "ch01",
-    createdAt: "2026-03-12T00:00:00.000Z",
-    message: "A key reveal happens",
-    patchOps: [
-      {
-        op: "timeline.add",
-        target: "timeline",
-        payload: {
-          label: "Reveal",
-          summary: "A key reveal happens",
-          chapterRef: "ch01",
-          stakes: "High",
-          notes: ""
+
+  for (let chapterNumber = 1; chapterNumber <= chapterCount; chapterNumber += 1) {
+    const chapterId = chapterIdFromNumber(chapterNumber);
+
+    project.outline.push({
+      id: `outline-${chapterNumber}`,
+      number: chapterNumber,
+      title: `Chapter ${chapterNumber}`,
+      purpose: "",
+      summary: "",
+      hook: "",
+      targetWords: 600
+    });
+    project.eventCommits.push({
+      id: `commit-${chapterNumber}`,
+      chapterId,
+      createdAt: "2026-03-12T00:00:00.000Z",
+      message: "A key reveal happens",
+      patchOps: [
+        {
+          op: "timeline.add",
+          target: "timeline",
+          payload: {
+            label: "Reveal",
+            summary: "A key reveal happens",
+            chapterRef: chapterId,
+            stakes: "High",
+            notes: ""
+          }
         }
-      }
-    ],
-    reads: ["world:premise"],
-    writes: ["timeline"],
-    forced: false,
-    ciPassed: true,
-    ciReport: null
-  });
-  project.dirtyChapters = ["ch01"];
+      ],
+      reads: ["world:premise"],
+      writes: ["timeline"],
+      forced: false,
+      ciPassed: true,
+      ciReport: null
+    });
+    project.dirtyChapters.push(chapterId);
+  }
 
   return project;
 }
@@ -132,5 +141,32 @@ describe("story render and compile", () => {
     expect(compileResult.missingChapters).toEqual(["ch02"]);
     expect(fs.existsSync(compileResult.outputPath)).toBe(true);
     expect(fs.readFileSync(compileResult.outputPath, "utf8")).toContain("## CH01");
+  });
+
+  it("respects render max concurrency while rendering multiple chapters", async () => {
+    const cwd = makeTempDir();
+    let activeRuns = 0;
+    let observedMaxActiveRuns = 0;
+    const runner: StructuredRunner = async ({ stage }) => {
+      activeRuns += 1;
+      observedMaxActiveRuns = Math.max(observedMaxActiveRuns, activeRuns);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      activeRuns -= 1;
+      return `Rendered chapter output for ${stage}`;
+    };
+    const renderResult = await renderStoryChapters({
+      cwd,
+      model: "deepseek/deepseek-chat",
+      project: createProjectForRender(3),
+      chapterIds: ["ch01", "ch02", "ch03"],
+      style: null,
+      force: false,
+      runner,
+      maxConcurrency: 2
+    });
+
+    expect(renderResult.rendered).toEqual(["ch01", "ch02", "ch03"]);
+    expect(observedMaxActiveRuns).toBeLessThanOrEqual(2);
+    expect(observedMaxActiveRuns).toBeGreaterThan(1);
   });
 });
