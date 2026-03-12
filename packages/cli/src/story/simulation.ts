@@ -296,12 +296,49 @@ export interface RenderStoryChaptersOptions {
   style: string | null;
   force: boolean;
   runner: StructuredRunner;
+  maxConcurrency?: number;
 }
 
 export interface RenderStoryChaptersResult {
   project: StoryProject;
   rendered: string[];
   skipped: string[];
+}
+
+function normalizeConcurrency(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 1;
+  }
+
+  return Math.max(1, Math.floor(value));
+}
+
+async function mapWithConcurrency<TItem, TResult>(
+  items: readonly TItem[],
+  maxConcurrency: number,
+  worker: (item: TItem, index: number) => Promise<TResult>
+): Promise<TResult[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const results = new Array<TResult>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(maxConcurrency, items.length);
+
+  const runWorker = async (): Promise<void> => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index], index);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: workerCount }, () => runWorker())
+  );
+
+  return results;
 }
 
 function upsertChapterRender(project: StoryProject, chapterId: string, model: string, commitIds: string[], file: string): void {
@@ -329,6 +366,12 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
   const rendered: string[] = [];
   const skipped: string[] = [];
   const chaptersDir = getChaptersDirectory(options.cwd);
+  const maxConcurrency = normalizeConcurrency(options.maxConcurrency);
+  const chaptersToRender: {
+    chapterId: string;
+    patchOps: EventPatchOp[];
+    commitIds: string[];
+  }[] = [];
 
   fs.mkdirSync(chaptersDir, { recursive: true });
 
@@ -346,32 +389,60 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
       continue;
     }
 
-    const chapterPatchOps = project.eventCommits
-      .filter((entry) => normalizeChapterId(entry.chapterId) === chapterId)
+    const chapterCommits = project.eventCommits
+      .filter((entry) => normalizeChapterId(entry.chapterId) === chapterId);
+    const chapterPatchOps = chapterCommits
       .flatMap((entry) => entry.patchOps);
-    const prompt = buildChapterRenderPrompt(project, chapterId, chapterPatchOps, options.style || undefined);
-    const chapterText = await options.runner({
-      cwd: options.cwd,
-      model: options.model,
-      prompt,
-      stage: `render-${chapterId}`
-    });
-    const chapterPath = path.join(chaptersDir, `${chapterId}.md`);
+    const commitIds = chapterCommits
+      .map((entry) => entry.id);
 
-    fs.writeFileSync(chapterPath, `${chapterText.trim()}\n`, "utf8");
+    chaptersToRender.push({
+      chapterId,
+      patchOps: chapterPatchOps,
+      commitIds
+    });
+  }
+
+  const renderedOutputs = await mapWithConcurrency(
+    chaptersToRender,
+    maxConcurrency,
+    async (chapter) => {
+      const prompt = buildChapterRenderPrompt(
+        project,
+        chapter.chapterId,
+        chapter.patchOps,
+        options.style || undefined
+      );
+      const chapterText = await options.runner({
+        cwd: options.cwd,
+        model: options.model,
+        prompt,
+        stage: `render-${chapter.chapterId}`
+      });
+      const chapterPath = path.join(chaptersDir, `${chapter.chapterId}.md`);
+
+      fs.writeFileSync(chapterPath, `${chapterText.trim()}\n`, "utf8");
+
+      return {
+        chapterId: chapter.chapterId,
+        chapterPath,
+        commitIds: chapter.commitIds
+      };
+    }
+  );
+
+  for (const output of renderedOutputs) {
     upsertChapterRender(
       project,
-      chapterId,
+      output.chapterId,
       options.model,
-      project.eventCommits
-        .filter((entry) => normalizeChapterId(entry.chapterId) === chapterId)
-        .map((entry) => entry.id),
-      path.relative(path.join(options.cwd, ".storyforge"), chapterPath)
+      output.commitIds,
+      path.relative(path.join(options.cwd, ".storyforge"), output.chapterPath)
     );
     project.dirtyChapters = project.dirtyChapters.filter(
-      (entry) => normalizeChapterId(entry) !== chapterId
+      (entry) => normalizeChapterId(entry) !== output.chapterId
     );
-    rendered.push(chapterId);
+    rendered.push(output.chapterId);
   }
 
   project.meta.updatedAt = new Date().toISOString();
