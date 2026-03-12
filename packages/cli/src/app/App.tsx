@@ -1315,6 +1315,81 @@ export function App({
       return initialState;
     }
 
+    if (currentModel.toLowerCase().startsWith("openrouter/")) {
+      stopStreamingProcess();
+      const streamRunId = streamRunIdRef.current + 1;
+      streamRunIdRef.current = streamRunId;
+      const pendingEntry: TranscriptEntry = {
+        id: `turn-${Date.now()}-${streamRunId}`,
+        prompt,
+        response: "",
+        provider: currentConnection.provider,
+        model: currentModel,
+        failed: false,
+        rawResponse: "",
+        streaming: true
+      };
+      const initialState = appendTranscriptEntry(
+        {
+          ...clearInputValue(currentState),
+          transientNotice: null,
+          pendingTask: {
+            kind: "chat",
+            stage: null
+          }
+        },
+        pendingEntry
+      );
+
+      void (async () => {
+        try {
+          const response = await structuredRunner({
+            cwd,
+            model: currentModel,
+            prompt,
+            stage: "chat"
+          });
+
+          if (streamRunIdRef.current !== streamRunId) {
+            return;
+          }
+
+          applyStateUpdate((activeState) => ({
+            ...updateLatestTranscriptEntry(activeState, (entry) => ({
+              ...entry,
+              response,
+              rawResponse: response,
+              failed: false,
+              streaming: false
+            })),
+            pendingTask: null
+          }));
+        } catch (error) {
+          if (streamRunIdRef.current !== streamRunId) {
+            return;
+          }
+
+          const message = error instanceof Error ? error.message : String(error);
+          applyStateUpdate((activeState) => ({
+            ...updateLatestTranscriptEntry(activeState, (entry) => ({
+              ...entry,
+              response: entry.response || message,
+              rawResponse: entry.rawResponse || message,
+              failed: true,
+              streaming: false
+            })),
+            pendingTask: null,
+            transientNotice: {
+              message: "Message send failed.",
+              expiresAt: Date.now() + 2_500
+            }
+          }));
+        }
+      })();
+
+      return initialState;
+    }
+
     stopStreamingProcess();
     const streamRunId = streamRunIdRef.current + 1;
     streamRunIdRef.current = streamRunId;

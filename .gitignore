@@ -11,6 +11,8 @@ packages/*/dist/
 !.env.example
 
 .storyforge/
+__pycache__/
+packages/cli/__pycache__/
 
 .cache/
 .turbo/

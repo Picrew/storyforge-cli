@@ -33,16 +33,16 @@ node packages/cli/dist/index.js
 
 1. Launch Storyforge.
 2. Run `/connect`.
-3. Select a provider such as `deepseek`.
+3. Select a provider such as `openrouter` or `deepseek`.
 4. Enter an API key or complete the OAuth flow, depending on the provider.
 5. Run `/models` and choose a model.
 6. Enter a prompt and press `Enter`.
 
-## Example DeepSeek Flow
+## Example OpenRouter Flow
 
 ```text
-/connect deepseek <api-key>
-/model deepseek/deepseek-chat
+/connect openrouter <api-key>
+/model openrouter/stepfun/step-3.5-flash:free
 Write a one-line premise about a city that remembers.
 ```
 

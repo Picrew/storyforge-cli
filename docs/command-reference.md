@@ -51,6 +51,7 @@ Examples:
 ```text
 /connect
 /connect deepseek <api-key>
+/connect openrouter <api-key>
 /connect google <api-key>
 ```
 
@@ -69,6 +70,7 @@ Examples:
 ```text
 /models
 /model deepseek/deepseek-chat
+/model openrouter/stepfun/step-3.5-flash:free
 ```
 
 Behavior:
