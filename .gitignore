@@ -6,6 +6,10 @@ dist/
 packages/*/dist/
 *.tsbuildinfo
 
+generated-novels/
+installers/
+.release-tmp/
+
 .env
 .env.*
 !.env.example
@@ -22,3 +26,13 @@ npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Local ad-hoc test runners (do not commit)
+test-3novels-v2.ts
+test-3novels-v3.ts
+test-3novels-v4.ts
+test-novel4-rerender.ts
+test-novel4-retry.ts
+test-novel9-rerender.ts
+test-novel10-rerender.ts
+test/story-bootstrap-retry.test.ts

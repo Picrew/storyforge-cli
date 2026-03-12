@@ -31,6 +31,8 @@ export interface StoryTaskOptions {
   project: StoryProject;
   runner: StructuredRunner;
   scope: StoryRefreshScope;
+  maxStageAttempts?: number;
+  retryBaseDelayMs?: number;
   onStageStart?: (progress: StoryTaskProgress) => void;
   onStageComplete?: (progress: StoryTaskProgress) => void;
 }
@@ -153,6 +155,35 @@ function ensureSaved(cwd: string, project: StoryProject): void {
   if (saveError) {
     throw new Error(saveError);
   }
+}
+
+const DEFAULT_STAGE_MAX_ATTEMPTS = 3;
+const DEFAULT_STAGE_RETRY_BASE_DELAY_MS = 400;
+
+function normalizeMaxStageAttempts(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_STAGE_MAX_ATTEMPTS;
+  }
+
+  return Math.min(10, Math.max(1, Math.floor(value)));
+}
+
+function normalizeRetryBaseDelayMs(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_STAGE_RETRY_BASE_DELAY_MS;
+  }
+
+  return Math.max(0, Math.floor(value));
+}
+
+function sleep(delayMs: number): Promise<void> {
+  if (delayMs <= 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
 }
 
 function getStagesForScope(scope: StoryRefreshScope): StoryBootstrapStage[] {
@@ -360,6 +391,37 @@ async function runStage(
   }
 }
 
+async function runStageWithRetry(
+  options: StoryTaskOptions,
+  project: StoryProject,
+  stage: StoryBootstrapStage
+): Promise<StoryProject> {
+  const maxAttempts = normalizeMaxStageAttempts(options.maxStageAttempts);
+  const retryBaseDelayMs = normalizeRetryBaseDelayMs(options.retryBaseDelayMs);
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await runStage(options, project, stage);
+    } catch (error) {
+      lastError = error;
+
+      if (attempt >= maxAttempts) {
+        break;
+      }
+
+      const delayMs = Math.round(retryBaseDelayMs * Math.pow(2, attempt - 1));
+      await sleep(delayMs);
+    }
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+
+  throw new Error("Story stage failed.");
+}
+
 export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTaskResult> {
   if (!options.project.brief.seedPrompt.trim()) {
     throw new Error("No saved story brief was found for this project.");
@@ -378,7 +440,7 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
     options.onStageStart?.(startProgress);
 
     try {
-      nextProject = await runStage(options, nextProject, stage);
+      nextProject = await runStageWithRetry(options, nextProject, stage);
       ensureSaved(options.cwd, nextProject);
       options.onStageComplete?.({
         stage,
