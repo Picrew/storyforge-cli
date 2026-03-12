@@ -94,19 +94,20 @@ node packages/cli/dist/index.js
 
 ## 2. 运行前依赖
 
-即使使用安装包，也需要本机具备：
+对于安装包（`.pkg` / `.dmg` / `tar.gz`），Storyforge 已内置 Node runtime。
+你只需要本机具备：
 
-- Node.js 20+
 - Python 3.10+
 - `opencode` 可执行
 
 检查命令：
 
 ```bash
-node -v
 python3 --version
 opencode --version
 ```
+
+如果你是源码运行（`pnpm dev`、`pnpm build`），仍然需要 Node.js 20+。
 
 ## 3. 新手先掌握这 8 个模式
 
