@@ -215,28 +215,49 @@ function compactPatchForPrompt(patchOps: readonly EventPatchOp[]): unknown {
   }));
 }
 
+export interface ChapterRenderPromptContext {
+  previousChapterId?: string;
+  previousChapterTitle?: string;
+  previousChapterSummary?: string;
+  previousChapterTail?: string;
+  targetWords?: number | null;
+}
+
 export function buildChapterRenderPrompt(
   project: StoryProject,
   chapterId: string,
   patchOps: readonly EventPatchOp[],
-  styleHint?: string
+  styleHint?: string,
+  context: ChapterRenderPromptContext = {}
 ): string {
   const chapterNumber = Number.parseInt(chapterId.replace(/^ch/i, ""), 10);
   const chapterPlan = Number.isFinite(chapterNumber)
     ? project.outline.find((chapter) => chapter.number === chapterNumber)
     : null;
   const style = styleHint?.trim() || project.brief.tone || project.world.tone || "balanced narrative prose";
+  const storyLanguage = project.brief.language || "English";
+  const fallbackTargetWords = project.brief.targetWords && project.outline.length > 0
+    ? Math.max(300, Math.round(project.brief.targetWords / project.outline.length))
+    : null;
+  const targetWords = context.targetWords ?? chapterPlan?.targetWords ?? fallbackTargetWords;
+  const previousSummary = context.previousChapterSummary?.trim() || "N/A";
+  const previousTail = context.previousChapterTail?.trim() || "N/A";
+  const previousChapterLabel = context.previousChapterId
+    ? `${context.previousChapterId}${context.previousChapterTitle ? ` (${context.previousChapterTitle})` : ""}`
+    : "N/A";
 
   return [
     "You are a fiction renderer.",
     "Write chapter prose directly. Do not return JSON.",
+    "Think through a draft, then self-edit once before producing the final text.",
     "",
     "Render constraints:",
     `- Chapter id: ${chapterId}`,
     `- Style: ${style}`,
-    `- Language: ${project.brief.language || "English"}`,
+    `- Language: ${storyLanguage}`,
     `- Genre: ${project.brief.genre || "N/A"}`,
     `- Tone baseline: ${project.brief.tone || project.world.tone || "N/A"}`,
+    `- Target length: ${targetWords ?? "No strict target"} words`,
     "",
     "World snapshot:",
     stringifyForPrompt({
@@ -256,13 +277,35 @@ export function buildChapterRenderPrompt(
     "Chapter plan:",
     stringifyForPrompt(chapterPlan ?? { number: chapterId, title: "", purpose: "", summary: "", hook: "" }),
     "",
+    "Previous chapter continuity anchor:",
+    stringifyForPrompt({
+      previousChapter: previousChapterLabel,
+      summary: previousSummary
+    }),
+    "Previous chapter ending excerpt (continue naturally from this when present):",
+    previousTail,
+    "",
     "Event patches for this chapter:",
     stringifyForPrompt(compactPatchForPrompt(patchOps)),
     "",
     "Writing rules:",
     "- Keep continuity with provided state and patch operations.",
+    "- If a previous chapter excerpt is present, open with an immediate next beat in the same narrative flow.",
+    "- Use scene-level structure: Goal -> Conflict -> Outcome (often with a cost or setback).",
+    "- Open with momentum: action, tension, or a meaningful question. Avoid warm-up exposition.",
+    "- Do not open with weather-only description, waking-up routine, mirror self-description, or neutral commuting.",
+    "- Show, do not tell: reveal emotion through action, dialogue, body response, and sensory detail.",
+    "- Use concrete nouns and strong verbs. Avoid adjective/adverb stacking.",
+    "- Avoid AI-flavor transitions and cliches: Meanwhile, Suddenly, In that moment, Little did they know.",
+    "- Avoid repetitive sentence openings and repetitive rhythm patterns.",
+    "- Avoid explaining an emotion right after already showing it.",
+    "- Keep character voice, motives, and knowledge consistent with prior chapters.",
+    "- End the chapter with forward momentum: unresolved tension, revelation, or a hard decision.",
+    "- If language is Chinese, keep prose fully natural Chinese and avoid random English insertions.",
+    "- If language is not Chinese, avoid random non-target-language text.",
     "- Mention consequences implied by item and foreshadow changes when relevant.",
     "- Avoid meta commentary about prompts or system design.",
-    "- Output only chapter text."
+    "- Output only chapter text.",
+    "- Do not add markdown headings."
   ].join("\n");
 }
