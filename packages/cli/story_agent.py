@@ -62,6 +62,20 @@ def issue(rule: str, severity: str, message: str, chapter_id: str | None = None,
     return payload
 
 
+def normalize_optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+
+    normalized = value.strip() if isinstance(value, str) else str(value).strip()
+    if not normalized:
+        return None
+
+    if normalized.lower() in {"none", "null", "undefined"}:
+        return None
+
+    return normalized
+
+
 def parse_quantity(value: Any, default: int = 1) -> int:
     if isinstance(value, bool):
         return default
@@ -499,7 +513,7 @@ def action_run_ci(request: Dict[str, Any]) -> Dict[str, Any]:
     errors: List[Dict[str, Any]] = []
     warnings: List[Dict[str, Any]] = []
     requested_scope = "commit" if request.get("scope") == "commit" else "all"
-    requested_commit_id = str(request.get("commit_id", "")).strip()
+    requested_commit_id = normalize_optional_string(request.get("commit_id"))
 
     # Rule 1: timeline monotonicity.
     last_chapter_ref: int | None = None

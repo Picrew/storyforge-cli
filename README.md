@@ -83,6 +83,14 @@ pnpm build
 node packages/cli/dist/index.js
 ```
 
+### Build Installers (macOS + Linux)
+
+```bash
+pnpm build:installers
+```
+
+Installer artifacts are generated under `installers/v<version>/`.
+
 ## Typical V2 Session
 
 ```text

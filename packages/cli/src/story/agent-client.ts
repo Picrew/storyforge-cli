@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { EventPatchOp, StoryCiReport, StoryProject } from "./types.js";
@@ -36,14 +37,45 @@ function getPythonCommand(): string {
   return process.env.STORYFORGE_PYTHON_BIN?.trim() || "python3";
 }
 
+function isPackagedRuntime(): boolean {
+  const runtimeProcess = process as NodeJS.Process & { pkg?: unknown };
+  return runtimeProcess.pkg != null;
+}
+
+function materializePackagedStoryAgent(snapshotPath: string): string {
+  const runtimeDir = path.join(os.homedir(), ".storyforge", "runtime");
+  const materializedPath = path.join(runtimeDir, "story_agent.py");
+  const bundledScript = fs.readFileSync(snapshotPath, "utf8");
+
+  fs.mkdirSync(runtimeDir, { recursive: true });
+
+  const shouldRewrite =
+    !fs.existsSync(materializedPath) || fs.readFileSync(materializedPath, "utf8") !== bundledScript;
+
+  if (shouldRewrite) {
+    fs.writeFileSync(materializedPath, bundledScript, "utf8");
+    fs.chmodSync(materializedPath, 0o755);
+  }
+
+  return materializedPath;
+}
+
 function resolveStoryAgentScriptPath(): string {
+  const executableSiblingPath = path.resolve(path.dirname(process.execPath), "story_agent.py");
   const localPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     "../../story_agent.py"
   );
   const cwdPath = path.resolve(process.cwd(), "packages/cli/story_agent.py");
 
+  if (fs.existsSync(executableSiblingPath)) {
+    return executableSiblingPath;
+  }
+
   if (fs.existsSync(localPath)) {
+    if (isPackagedRuntime()) {
+      return materializePackagedStoryAgent(localPath);
+    }
     return localPath;
   }
 
@@ -51,7 +83,9 @@ function resolveStoryAgentScriptPath(): string {
     return cwdPath;
   }
 
-  throw new Error(`story_agent.py was not found. Checked: ${localPath}, ${cwdPath}`);
+  throw new Error(
+    `story_agent.py was not found. Checked: ${executableSiblingPath}, ${localPath}, ${cwdPath}`
+  );
 }
 
 function runStoryAgent<TResponse extends StoryAgentBaseResponse>(payload: Record<string, unknown>): Promise<TResponse> {

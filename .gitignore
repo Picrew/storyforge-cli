@@ -6,6 +6,10 @@ dist/
 packages/*/dist/
 *.tsbuildinfo
 
+generated-novels/
+installers/
+.release-tmp/
+
 .env
 .env.*
 !.env.example
