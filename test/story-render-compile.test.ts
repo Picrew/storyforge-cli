@@ -169,4 +169,25 @@ describe("story render and compile", () => {
     expect(observedMaxActiveRuns).toBeLessThanOrEqual(2);
     expect(observedMaxActiveRuns).toBeGreaterThan(1);
   });
+
+  it("removes accidental chapter headings from rendered output", async () => {
+    const cwd = makeTempDir();
+    const runner: StructuredRunner = async () =>
+      "# 第一章 风暴前夜\n\n海风穿过防波堤，潮声如雷。";
+    const renderResult = await renderStoryChapters({
+      cwd,
+      model: "deepseek/deepseek-chat",
+      project: createProjectForRender(),
+      chapterIds: ["ch01"],
+      style: null,
+      force: false,
+      runner
+    });
+    const chapterPath = path.join(cwd, ".storyforge", "chapters", "ch01.md");
+    const chapterText = fs.readFileSync(chapterPath, "utf8");
+
+    expect(renderResult.rendered).toEqual(["ch01"]);
+    expect(chapterText).not.toContain("# 第一章");
+    expect(chapterText).toContain("海风穿过防波堤");
+  });
 });

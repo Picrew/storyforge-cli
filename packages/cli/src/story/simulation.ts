@@ -7,9 +7,15 @@ import {
   planPatchWithAgent,
   runCiWithAgent
 } from "./agent-client.js";
-import { normalizeChapterId } from "./chapter-id.js";
+import {
+  compareChapterIds,
+  formatChapterId,
+  normalizeChapterId,
+  parseChapterNumber
+} from "./chapter-id.js";
 import {
   buildChapterRenderPrompt,
+  type ChapterRenderPromptContext,
   buildCommitPatchPrompt
 } from "./prompt-catalog.js";
 import { parseStructuredJson, type StructuredRunner } from "./structured-run.js";
@@ -25,6 +31,20 @@ interface ResolvedPatchPayload {
   patchOps: EventPatchOp[];
   reads: string[];
   writes: string[];
+  source: "model" | "python-fallback" | "file";
+}
+
+const MODEL_PATCH_MAX_ATTEMPTS = 3;
+const MODEL_PATCH_RETRY_BASE_DELAY_MS = 300;
+
+function sleep(delayMs: number): Promise<void> {
+  if (delayMs <= 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
 }
 
 function cloneProject(project: StoryProject): StoryProject {
@@ -116,26 +136,34 @@ async function resolvePatchPayloadFromModel(
     runner: StructuredRunner;
   }
 ): Promise<ResolvedPatchPayload> {
-  const raw = await options.runner({
-    cwd: options.cwd,
-    model: options.model,
-    prompt: buildCommitPatchPrompt(options.project, options.chapterId, options.eventText),
-    stage: "commit-patch"
-  });
+  for (let attempt = 1; attempt <= MODEL_PATCH_MAX_ATTEMPTS; attempt += 1) {
+    const raw = await options.runner({
+      cwd: options.cwd,
+      model: options.model,
+      prompt: buildCommitPatchPrompt(options.project, options.chapterId, options.eventText),
+      stage: "commit-patch"
+    });
 
-  try {
-    const parsed = parseStructuredJson<PlannedPatchPayload>(raw);
-    const patchOps = normalizePatchOps(parsed.patchOps);
+    try {
+      const parsed = parseStructuredJson<PlannedPatchPayload>(raw);
+      const patchOps = normalizePatchOps(parsed.patchOps);
 
-    if (patchOps.length > 0) {
-      return {
-        patchOps,
-        reads: asStringArray(parsed.reads),
-        writes: asStringArray(parsed.writes)
-      };
+      if (patchOps.length > 0) {
+        return {
+          patchOps,
+          reads: asStringArray(parsed.reads),
+          writes: asStringArray(parsed.writes),
+          source: "model"
+        };
+      }
+    } catch {
+      // Retry malformed structured output before falling back.
     }
-  } catch {
-    // Fall back to python-side planning below.
+
+    if (attempt < MODEL_PATCH_MAX_ATTEMPTS) {
+      const delayMs = Math.round(MODEL_PATCH_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1));
+      await sleep(delayMs);
+    }
   }
 
   const fallback = await planPatchWithAgent(options.project, options.chapterId, options.eventText);
@@ -143,7 +171,8 @@ async function resolvePatchPayloadFromModel(
   return {
     patchOps: normalizePatchOps(fallback.patch_ops),
     reads: asStringArray(fallback.reads),
-    writes: asStringArray(fallback.writes)
+    writes: asStringArray(fallback.writes),
+    source: "python-fallback"
   };
 }
 
@@ -155,14 +184,16 @@ function resolvePatchPayloadFromFile(patchFilePath: string): ResolvedPatchPayloa
     return {
       patchOps: normalizePatchOps(parsed),
       reads: [],
-      writes: []
+      writes: [],
+      source: "file"
     };
   }
 
   return {
     patchOps: normalizePatchOps(parsed.patchOps),
     reads: asStringArray(parsed.reads),
-    writes: asStringArray(parsed.writes)
+    writes: asStringArray(parsed.writes),
+    source: "file"
   };
 }
 
@@ -198,7 +229,7 @@ export async function commitStoryEvent(options: CommitStoryEventOptions): Promis
   }
 
   const baseProject = cloneProject(options.project);
-  const patchPayload = options.patchFilePath
+  let patchPayload = options.patchFilePath
     ? resolvePatchPayloadFromFile(options.patchFilePath)
     : await resolvePatchPayloadFromModel({
         cwd: options.cwd,
@@ -213,13 +244,45 @@ export async function commitStoryEvent(options: CommitStoryEventOptions): Promis
     throw new Error("No patch operations were produced.");
   }
 
-  const applyResult = await applyPatchWithAgent(
-    baseProject,
-    normalizedChapterId,
-    patchPayload.patchOps,
-    patchPayload.reads,
-    patchPayload.writes
-  );
+  let applyResult: Awaited<ReturnType<typeof applyPatchWithAgent>>;
+
+  try {
+    applyResult = await applyPatchWithAgent(
+      baseProject,
+      normalizedChapterId,
+      patchPayload.patchOps,
+      patchPayload.reads,
+      patchPayload.writes
+    );
+  } catch (error) {
+    const canFallbackToPlanner = !options.patchFilePath && patchPayload.source === "model";
+
+    if (!canFallbackToPlanner) {
+      throw error;
+    }
+
+    const fallback = await planPatchWithAgent(baseProject, normalizedChapterId, options.eventText);
+    const fallbackPatchPayload: ResolvedPatchPayload = {
+      patchOps: normalizePatchOps(fallback.patch_ops),
+      reads: asStringArray(fallback.reads),
+      writes: asStringArray(fallback.writes),
+      source: "python-fallback"
+    };
+
+    if (fallbackPatchPayload.patchOps.length === 0) {
+      throw error;
+    }
+
+    patchPayload = fallbackPatchPayload;
+    applyResult = await applyPatchWithAgent(
+      baseProject,
+      normalizedChapterId,
+      patchPayload.patchOps,
+      patchPayload.reads,
+      patchPayload.writes
+    );
+  }
+
   const patchedProject = cloneProject(applyResult.next_state);
   const ciResult = await runCiWithAgent(patchedProject, "commit");
   const ciReport = ciResult.ci_report;
@@ -341,6 +404,134 @@ async function mapWithConcurrency<TItem, TResult>(
   return results;
 }
 
+const DEFAULT_PREVIOUS_TAIL_CHARS = 900;
+
+function stripCodeFenceWrapper(value: string): string {
+  const trimmed = value.trim();
+  const fenceMatch = /^```(?:\w+)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  return fenceMatch ? fenceMatch[1].trim() : trimmed;
+}
+
+function stripLeadingChapterHeading(value: string): string {
+  const lines = stripCodeFenceWrapper(value).split(/\r?\n/);
+
+  while (lines.length > 0 && !lines[0].trim()) {
+    lines.shift();
+  }
+
+  if (lines.length === 0) {
+    return "";
+  }
+
+  const firstLine = lines[0].trim();
+  const headingPatterns = [
+    /^#{1,6}\s+/,
+    /^chapter\s*\d+/i,
+    /^ch\d+\b/i,
+    /^第[一二三四五六七八九十百千\d]+章/
+  ];
+
+  if (headingPatterns.some((pattern) => pattern.test(firstLine))) {
+    lines.shift();
+  }
+
+  while (lines.length > 0 && !lines[0].trim()) {
+    lines.shift();
+  }
+
+  return lines.join("\n").trim();
+}
+
+function normalizeRenderedChapterText(value: string): string {
+  return stripLeadingChapterHeading(value).trim();
+}
+
+function getExistingChapterTail(chaptersDir: string, chapterId: string, maxChars: number): string {
+  const chapterPath = path.join(chaptersDir, `${chapterId}.md`);
+
+  if (!fs.existsSync(chapterPath)) {
+    return "";
+  }
+
+  const content = normalizeRenderedChapterText(fs.readFileSync(chapterPath, "utf8"));
+
+  if (!content) {
+    return "";
+  }
+
+  if (content.length <= maxChars) {
+    return content;
+  }
+
+  return `...${content.slice(-maxChars)}`;
+}
+
+function buildPreviousChapterSummary(project: StoryProject, chapterId: string): string {
+  const previousChapterNumber = parseChapterNumber(chapterId);
+
+  if (previousChapterNumber === null || previousChapterNumber <= 1) {
+    return "";
+  }
+
+  const previousChapterId = formatChapterId(previousChapterNumber - 1);
+  const previousPlan = project.outline.find((entry) => entry.number === previousChapterNumber - 1);
+  const timelineSummaries = project.timeline
+    .filter((entry) => normalizeChapterId(entry.chapterRef) === previousChapterId)
+    .map((entry) => entry.summary.trim())
+    .filter(Boolean);
+  const commitSummaries = project.eventCommits
+    .filter((entry) => normalizeChapterId(entry.chapterId) === previousChapterId)
+    .map((entry) => entry.message.trim())
+    .filter(Boolean);
+
+  const sections: string[] = [];
+
+  if (previousPlan?.summary.trim()) {
+    sections.push(`Plan summary: ${previousPlan.summary.trim()}`);
+  }
+
+  if (timelineSummaries.length > 0) {
+    sections.push(`Timeline beats: ${timelineSummaries.slice(-3).join(" | ")}`);
+  }
+
+  if (commitSummaries.length > 0) {
+    sections.push(`Committed events: ${commitSummaries.slice(-3).join(" | ")}`);
+  }
+
+  return sections.join("\n");
+}
+
+function buildChapterRenderPromptContext(
+  project: StoryProject,
+  chaptersDir: string,
+  chapterId: string
+): ChapterRenderPromptContext {
+  const chapterNumber = parseChapterNumber(chapterId);
+  const chapterPlan = chapterNumber
+    ? project.outline.find((entry) => entry.number === chapterNumber)
+    : null;
+  const targetWords = chapterPlan?.targetWords ?? null;
+
+  if (chapterNumber === null || chapterNumber <= 1) {
+    return {
+      targetWords
+    };
+  }
+
+  const previousChapterId = formatChapterId(chapterNumber - 1);
+  const previousChapterPlan = project.outline.find((entry) => entry.number === chapterNumber - 1);
+  const previousChapterSummary = buildPreviousChapterSummary(project, chapterId);
+  const previousChapterTail = getExistingChapterTail(chaptersDir, previousChapterId, DEFAULT_PREVIOUS_TAIL_CHARS);
+
+  return {
+    previousChapterId,
+    previousChapterTitle: previousChapterPlan?.title || "",
+    previousChapterSummary,
+    previousChapterTail,
+    targetWords
+  };
+}
+
 function upsertChapterRender(project: StoryProject, chapterId: string, model: string, commitIds: string[], file: string): void {
   const renderedAt = new Date().toISOString();
   const existingIndex = project.chapterRenders.findIndex((entry) => normalizeChapterId(entry.chapterId) === chapterId);
@@ -403,15 +594,19 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
     });
   }
 
+  chaptersToRender.sort((left, right) => compareChapterIds(left.chapterId, right.chapterId));
+
   const renderedOutputs = await mapWithConcurrency(
     chaptersToRender,
     maxConcurrency,
     async (chapter) => {
+      const promptContext = buildChapterRenderPromptContext(project, chaptersDir, chapter.chapterId);
       const prompt = buildChapterRenderPrompt(
         project,
         chapter.chapterId,
         chapter.patchOps,
-        options.style || undefined
+        options.style || undefined,
+        promptContext
       );
       const chapterText = await options.runner({
         cwd: options.cwd,
@@ -420,8 +615,9 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
         stage: `render-${chapter.chapterId}`
       });
       const chapterPath = path.join(chaptersDir, `${chapter.chapterId}.md`);
+      const normalizedChapterText = normalizeRenderedChapterText(chapterText);
 
-      fs.writeFileSync(chapterPath, `${chapterText.trim()}\n`, "utf8");
+      fs.writeFileSync(chapterPath, `${normalizedChapterText}\n`, "utf8");
 
       return {
         chapterId: chapter.chapterId,
