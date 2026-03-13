@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBlankStoryProject } from "../packages/cli/src/story/project-store.js";
-import { runCiWithAgent } from "../packages/cli/src/story/agent-client.js";
+import { applyPatchWithAgent, runCiWithAgent } from "../packages/cli/src/story/agent-client.js";
 
 function createBaseProject() {
   const project = createBlankStoryProject("2026-03-12T00:00:00.000Z", "CI Story");
@@ -103,6 +103,55 @@ describe("story agent CI rules", () => {
 
     expect(report.ci_report.passed).toBe(false);
     expect(report.ci_report.errors.some((issue) => issue.rule === "timeline_monotonic")).toBe(true);
+  });
+
+  it("keeps timeline monotonic when adding an early chapter beat", async () => {
+    const project = createBaseProject();
+
+    project.timeline = Array.from({ length: 6 }, (_, index) => ({
+      id: `beat-${index + 1}`,
+      label: `Beat ${index + 1}`,
+      summary: "",
+      chapterRef: `ch${String(index + 1).padStart(2, "0")}`,
+      stakes: "",
+      notes: ""
+    }));
+
+    const applyResult = await applyPatchWithAgent(
+      project,
+      "ch01",
+      [
+        {
+          op: "timeline.add",
+          target: "timeline",
+          payload: {
+            id: "beat-backfill",
+            label: "Backfill Beat",
+            summary: "Inserted after initial run",
+            chapterRef: "ch01",
+            stakes: "",
+            notes: ""
+          }
+        }
+      ],
+      [],
+      ["timeline"]
+    );
+
+    expect(applyResult.next_state.timeline.map((entry) => entry.id)).toEqual([
+      "beat-1",
+      "beat-backfill",
+      "beat-2",
+      "beat-3",
+      "beat-4",
+      "beat-5",
+      "beat-6"
+    ]);
+
+    const report = await runCiWithAgent(applyResult.next_state, "commit");
+
+    expect(report.ci_report.passed).toBe(true);
+    expect(report.ci_report.errors.some((issue) => issue.rule === "timeline_monotonic")).toBe(false);
   });
 
   it("flags missing entity references", async () => {

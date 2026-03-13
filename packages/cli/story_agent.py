@@ -116,6 +116,29 @@ def find_timeline_beat(project: Dict[str, Any], token: Any) -> Dict[str, Any] | 
     return None
 
 
+def insert_timeline_beat(project: Dict[str, Any], beat: Dict[str, Any]) -> None:
+    timeline = project.get("timeline")
+    if not isinstance(timeline, list):
+        timeline = []
+        project["timeline"] = timeline
+
+    target_chapter = extract_chapter_number_from_ref(beat.get("chapterRef"))
+    if target_chapter is None or len(timeline) == 0:
+        timeline.append(beat)
+        return
+
+    insert_index = len(timeline)
+    for index, existing in enumerate(timeline):
+        existing_chapter = extract_chapter_number_from_ref(existing.get("chapterRef"))
+        if existing_chapter is None:
+            continue
+        if existing_chapter > target_chapter:
+            insert_index = index
+            break
+
+    timeline.insert(insert_index, beat)
+
+
 def find_item(project: Dict[str, Any], token: Any) -> Dict[str, Any] | None:
     if not isinstance(token, str):
         return None
@@ -253,16 +276,15 @@ def apply_patch_op(project: Dict[str, Any], chapter_id: str, patch_op: Dict[str,
 
     if op == "timeline.add":
         label = str(payload.get("label", "")).strip() or "Untitled Beat"
-        project["timeline"].append(
-            {
-                "id": str(payload.get("id", uuid.uuid4())),
-                "label": label,
-                "summary": str(payload.get("summary", "")),
-                "chapterRef": str(payload.get("chapterRef", chapter_id)),
-                "stakes": str(payload.get("stakes", "")),
-                "notes": str(payload.get("notes", "")),
-            }
-        )
+        beat = {
+            "id": str(payload.get("id", uuid.uuid4())),
+            "label": label,
+            "summary": str(payload.get("summary", "")),
+            "chapterRef": str(payload.get("chapterRef", chapter_id)),
+            "stakes": str(payload.get("stakes", "")),
+            "notes": str(payload.get("notes", "")),
+        }
+        insert_timeline_beat(project, beat)
         return
 
     if op == "timeline.set":
