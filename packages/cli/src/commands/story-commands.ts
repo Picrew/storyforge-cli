@@ -227,6 +227,8 @@ interface ParsedCommandFlags {
   valueFlags: Map<string, string>;
 }
 
+const KNOWN_BOOLEAN_FLAGS = new Set(["force", "all", "visual"]);
+
 function parseCommandFlags(args: readonly string[]): ParsedCommandFlags {
   const positional: string[] = [];
   const booleanFlags = new Set<string>();
@@ -243,6 +245,11 @@ function parseCommandFlags(args: readonly string[]): ParsedCommandFlags {
     const flagName = token.slice(2).toLowerCase();
 
     if (!flagName) {
+      continue;
+    }
+
+    if (KNOWN_BOOLEAN_FLAGS.has(flagName)) {
+      booleanFlags.add(flagName);
       continue;
     }
 
@@ -290,12 +297,26 @@ function createBlankTimelineBeat(label: string): TimelineBeat {
   };
 }
 
+function createBlankChapterPlan(title: string, number: number): ChapterPlan {
+  return {
+    id: randomUUID(),
+    number,
+    title,
+    purpose: "",
+    summary: "",
+    hook: "",
+    targetWords: null
+  };
+}
+
 function updateOutlineField(
   row: ChapterPlan,
   field: string,
   value: string
 ): ChapterPlan | null {
-  switch (field) {
+  const normalizedField = field.toLowerCase();
+
+  switch (normalizedField) {
     case "number": {
       const parsed = Number.parseInt(value, 10);
 
@@ -346,7 +367,9 @@ function updateCharacterField(
   field: string,
   value: string
 ): CharacterProfile | null {
-  switch (field) {
+  const normalizedField = field.toLowerCase();
+
+  switch (normalizedField) {
     case "name":
     case "role":
     case "age":
@@ -358,7 +381,7 @@ function updateCharacterField(
     case "tags":
       return {
         ...row,
-        [field]: value
+        [normalizedField]: value
       };
     default:
       return null;
@@ -370,7 +393,9 @@ function updateTimelineFieldNormalized(
   field: string,
   value: string
 ): TimelineBeat | null {
-  switch (field) {
+  const normalizedField = field.toLowerCase();
+
+  switch (normalizedField) {
     case "label":
       return {
         ...row,
@@ -693,23 +718,27 @@ export function handleStoryCommand(
         };
       }
 
-      const field = parsedCommand.args[1];
+      const rawField = parsedCommand.args[1];
       const value = getRest(parsedCommand.args, 2);
       const nextProject = cloneProject(context.currentProject);
+      const worldFieldMap = new Map(
+        Object.keys(nextProject.world).map((key) => [key.toLowerCase(), key])
+      );
+      const resolvedField = worldFieldMap.get(rawField.toLowerCase());
 
-      if (!(field in nextProject.world)) {
+      if (!resolvedField) {
         return {
           type: "notice",
-          message: `Unknown world field: ${field}`
+          message: `Unknown world field: ${rawField}`
         };
       }
 
       nextProject.world = {
         ...nextProject.world,
-        [field]: value
+        [resolvedField]: value
       };
 
-      return withView(nextProject, "world", `Updated world.${field}.`);
+      return withView(nextProject, "world", `Updated world.${resolvedField}.`);
     }
 
     case "/char": {
@@ -855,8 +884,19 @@ export function handleStoryCommand(
       }
 
       const nextProject = cloneProject(context.currentProject);
+      const action = parsedCommand.args[0];
 
-      if (parsedCommand.args[0] === "rm" && parsedCommand.args.length === 2) {
+      if (action === "add" && parsedCommand.args.length >= 2) {
+        const title = getRest(parsedCommand.args, 1);
+        const nextNumber = nextProject.outline.length > 0
+          ? Math.max(...nextProject.outline.map((entry) => entry.number)) + 1
+          : 1;
+
+        nextProject.outline.push(createBlankChapterPlan(title, nextNumber));
+        return withView(nextProject, "outline", "Outline chapter added.");
+      }
+
+      if (action === "rm" && parsedCommand.args.length === 2) {
         const rowIndex = parseRow(parsedCommand.args[1]);
 
         if (rowIndex === null || !nextProject.outline[rowIndex]) {
@@ -870,7 +910,7 @@ export function handleStoryCommand(
         return withView(nextProject, "outline", "Outline chapter removed.");
       }
 
-      if (parsedCommand.args[0] === "set" && parsedCommand.args.length >= 4) {
+      if (action === "set" && parsedCommand.args.length >= 4) {
         const rowIndex = parseRow(parsedCommand.args[1]);
         const field = parsedCommand.args[2];
         const value = getRest(parsedCommand.args, 3);
@@ -897,7 +937,7 @@ export function handleStoryCommand(
 
       return {
         type: "notice",
-        message: "Usage: /outline | /outline set <row> <field> <value...> | /outline rm <row>"
+        message: "Usage: /outline | /outline add <title...> | /outline set <row> <field> <value...> | /outline rm <row>"
       };
     }
 
