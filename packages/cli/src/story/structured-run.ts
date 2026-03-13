@@ -180,7 +180,7 @@ async function runOpenRouterStructuredPrompt(model: string, prompt: string): Pro
   try {
     payload = await response.json();
   } catch {
-    payload = null;
+    // Response body could not be parsed — payload stays null.
   }
 
   if (!response.ok) {
