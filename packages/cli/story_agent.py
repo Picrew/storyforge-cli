@@ -368,7 +368,9 @@ def apply_patch_op(project: Dict[str, Any], chapter_id: str, patch_op: Dict[str,
     if op == "foreshadow.add":
         entry_id = str(payload.get("id", uuid.uuid4()))
         label = str(payload.get("label", "")).strip() or f"Foreshadow {entry_id[:8]}"
-        due_chapter = normalize_chapter_id(str(payload.get("dueChapter", chapter_id)))
+        raw_due = payload.get("dueChapter")
+        due_chapter_str = str(raw_due).strip() if raw_due is not None and str(raw_due).strip() else ""
+        due_chapter = normalize_chapter_id(due_chapter_str) if due_chapter_str else chapter_id
         if find_foreshadow(project, entry_id):
             raise ValueError(f"foreshadow.add entry already exists: {entry_id}")
         project["foreshadows"].append(
@@ -398,7 +400,10 @@ def apply_patch_op(project: Dict[str, Any], chapter_id: str, patch_op: Dict[str,
 
 def action_apply_patch(request: Dict[str, Any]) -> Dict[str, Any]:
     project = ensure_project_v2(copy.deepcopy(request.get("project_state", {})))
-    chapter_id = normalize_chapter_id(request.get("chapter_id"))
+    raw_chapter_id = request.get("chapter_id")
+    if chapter_number(raw_chapter_id) is None:
+        raise ValueError(f"Invalid chapter id: {raw_chapter_id}")
+    chapter_id = normalize_chapter_id(raw_chapter_id)
     patch_ops = request.get("patch_ops")
     if not isinstance(patch_ops, list) or len(patch_ops) == 0:
         raise ValueError("patch_ops must be a non-empty array.")
@@ -540,8 +545,17 @@ def action_run_ci(request: Dict[str, Any]) -> Dict[str, Any]:
     # Rule 1: timeline monotonicity.
     last_chapter_ref: int | None = None
     for beat in project.get("timeline", []):
-        beat_ref = extract_chapter_number_from_ref(beat.get("chapterRef"))
+        raw_ref = beat.get("chapterRef", "")
+        beat_ref = extract_chapter_number_from_ref(raw_ref)
         if beat_ref is None:
+            if isinstance(raw_ref, str) and raw_ref.strip():
+                warnings.append(
+                    issue(
+                        "timeline_invalid_ref",
+                        "warning",
+                        f"Timeline beat '{beat.get('label', '')}' has an invalid chapterRef: '{raw_ref}'.",
+                    )
+                )
             continue
         if last_chapter_ref is not None and beat_ref < last_chapter_ref:
             errors.append(
