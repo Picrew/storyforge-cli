@@ -160,6 +160,7 @@ export function AppShell({
               turns={transcriptTurns}
               scrollOffset={state.transcriptScrollOffset}
               visibleLines={transcriptVisibleLines}
+              pendingTask={state.pendingTask}
             />
           </Box>
         ) : null}
@@ -181,7 +182,7 @@ export function AppShell({
           </Box>
         ) : null}
         <Box marginTop={1}>
-          <Footer cwd={cwd} width={contentWidth} />
+          <Footer cwd={cwd} width={contentWidth} pendingTask={state.pendingTask} />
         </Box>
       </Box>
     </Box>
