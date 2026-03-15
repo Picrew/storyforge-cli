@@ -1,14 +1,17 @@
 import React from "react";
 import { Box, Text } from "ink";
+import type { PendingTask } from "../story/types.js";
 import type { TranscriptEntry } from "../types.js";
 import { themeTokens } from "../theme/tokens.js";
 import { wrapTextByWidth } from "../utils/display-width.js";
+import { useSpinner } from "./useSpinner.js";
 
 interface ResponsePanelProps {
   width: number;
   turns: readonly TranscriptEntry[];
   scrollOffset: number;
   visibleLines?: number;
+  pendingTask: PendingTask | null;
 }
 
 interface TranscriptLine {
@@ -59,8 +62,14 @@ function pushPreformattedLines(
   });
 }
 
-function buildTranscriptLines(turns: readonly TranscriptEntry[], width: number): readonly TranscriptLine[] {
+function buildTranscriptLines(
+  turns: readonly TranscriptEntry[],
+  width: number,
+  pendingTask: PendingTask | null,
+  spinnerFrame: string
+): readonly TranscriptLine[] {
   const lines: TranscriptLine[] = [];
+  const lastIndex = turns.length - 1;
 
   turns.forEach((turn, index) => {
     if (index > 0) {
@@ -97,9 +106,23 @@ function buildTranscriptLines(turns: readonly TranscriptEntry[], width: number):
       return;
     }
 
+    const isLastTurn = index === lastIndex;
+    let statusSuffix = "";
+    if (isLastTurn) {
+      if (turn.streaming) {
+        statusSuffix = ` ${spinnerFrame} streaming`;
+      } else if (pendingTask) {
+        statusSuffix = ` ${spinnerFrame} running`;
+      } else if (turn.failed) {
+        statusSuffix = " ✗ failed";
+      } else {
+        statusSuffix = " ✓ done";
+      }
+    }
+
     lines.push({
       key: `${turn.id}-meta`,
-      text: `Build ${index + 1} · ${turn.model}${turn.streaming ? " · streaming" : ""}`,
+      text: `Build ${index + 1} · ${turn.model}${statusSuffix}`,
       color: themeTokens.accentSecondary
     });
     pushWrappedLines(lines, turn.id, "You", turn.prompt, themeTokens.textPrimary, width);
@@ -107,7 +130,7 @@ function buildTranscriptLines(turns: readonly TranscriptEntry[], width: number):
       lines,
       turn.id,
       turn.failed ? "Error" : "Assistant",
-      turn.response || (turn.streaming ? "..." : ""),
+      turn.response || (turn.streaming || (isLastTurn && pendingTask) ? "..." : ""),
       lineColor,
       width
     );
@@ -120,11 +143,14 @@ export function ResponsePanel({
   width,
   turns,
   scrollOffset,
-  visibleLines = 14
+  visibleLines = 14,
+  pendingTask
 }: ResponsePanelProps): React.JSX.Element {
+  const isRunning = Boolean(pendingTask) || Boolean(turns[turns.length - 1]?.streaming);
+  const spinnerFrame = useSpinner(isRunning);
   const divider = "-".repeat(Math.max(12, width - 6));
   const bodyWidth = Math.max(12, width - 6);
-  const allLines = buildTranscriptLines(turns, bodyWidth);
+  const allLines = buildTranscriptLines(turns, bodyWidth, pendingTask, spinnerFrame);
   const clampedVisibleLines = Math.max(6, visibleLines);
   const maxOffset = Math.max(0, allLines.length - clampedVisibleLines);
   const safeOffset = Math.min(scrollOffset, maxOffset);
@@ -132,7 +158,12 @@ export function ResponsePanel({
   const startIndex = Math.max(0, endIndex - clampedVisibleLines);
   const visibleTranscript = allLines.slice(startIndex, endIndex);
   const fillerCount = Math.max(0, clampedVisibleLines - visibleTranscript.length);
-  const title = turns[turns.length - 1]?.streaming ? "STREAMING TRANSCRIPT" : "TRANSCRIPT";
+  const lastTurn = turns[turns.length - 1];
+  const title = lastTurn?.streaming
+    ? "STREAMING TRANSCRIPT"
+    : pendingTask
+      ? "RUNNING TRANSCRIPT"
+      : "TRANSCRIPT";
   const badge = safeOffset > 0 ? `scroll ${safeOffset}/${maxOffset}` : `${turns.length} turns`;
 
   return (
