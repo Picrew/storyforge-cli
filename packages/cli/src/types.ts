@@ -80,12 +80,18 @@ export interface ModelPickerModal {
   modelIds: readonly string[];
 }
 
+export interface ProjectPickerModal {
+  kind: "project-picker";
+  selectedIndex: number;
+}
+
 export type ModalState =
   | ProviderPickerModal
   | ConnectAuthModeModal
   | ConnectOauthModal
   | ConnectCredentialsModal
-  | ModelPickerModal;
+  | ModelPickerModal
+  | ProjectPickerModal;
 
 export interface LatestExchange {
   prompt: string;

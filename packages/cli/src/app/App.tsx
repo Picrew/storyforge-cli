@@ -34,12 +34,14 @@ import {
   moveInputCursorToEnd,
   moveInputCursorToStart,
   moveModelPickerSelection,
+  moveProjectPickerSelection,
   moveTranscriptScroll,
   openConnectAuthModeModal,
   openConnectCredentialsModal,
   openConnectOauthModal,
   openConnectProviderModal,
   openModelPickerModal,
+  openProjectPickerModal,
   resetTranscriptScroll,
   reopenConnectProviderModal,
   replaceInputValue,
@@ -1578,6 +1580,22 @@ export function App({
         };
       }
 
+      if (storyResult.type === "project-picker") {
+        const activeProjectIndex = currentState.storyProjects.findIndex(
+          (entry) => entry.id === currentState.storyProjectId
+        );
+        const selectedIndex = activeProjectIndex >= 0 ? activeProjectIndex : 0;
+
+        return {
+          nextState: setTransientNotice(
+            openProjectPickerModal(clearInputValue(currentState), selectedIndex),
+            storyResult.message,
+            now
+          ),
+          shouldExit: false
+        };
+      }
+
       if (storyResult.type === "create") {
         if (storyResult.dir) {
           const resolvedDir = path.isAbsolute(storyResult.dir)
@@ -2430,12 +2448,45 @@ export function App({
     return persistConfig(nextState, outcome.nextConfig);
   };
 
+  const handleProjectPickerSubmit = (currentState: AppState, now: number): AppState => {
+    if (!currentState.modal || currentState.modal.kind !== "project-picker") {
+      return currentState;
+    }
+
+    const selectedProject =
+      currentState.storyProjects[
+        Math.min(currentState.modal.selectedIndex, currentState.storyProjects.length - 1)
+      ];
+
+    if (!selectedProject) {
+      return setTransientNotice(closeModal(currentState), "No saved story projects yet.", now);
+    }
+
+    const submission = executeParsedCommand(
+      closeModal(currentState),
+      {
+        command: "/projects",
+        args: ["open", String(currentState.modal.selectedIndex + 1)]
+      },
+      now
+    );
+
+    return submission.nextState;
+  };
+
   const handleCommandSubmit = (currentState: AppState, now: number): { nextState: AppState; shouldExit: boolean } => {
+    const parsedCommand = parseCommandInput(currentState.inputValue);
+
+    if (
+      (parsedCommand?.command === "/project" && parsedCommand.args.length === 0) ||
+      (parsedCommand?.command === "/projects" && parsedCommand.args.length === 0)
+    ) {
+      return executeParsedCommand(currentState, parsedCommand, now);
+    }
+
     if (shouldShowCommandPreview(currentState.inputValue)) {
       return executePaletteAction(currentState, now);
     }
-
-    const parsedCommand = parseCommandInput(currentState.inputValue);
 
     if (!parsedCommand) {
       return {
@@ -2625,6 +2676,24 @@ export function App({
         return;
       }
 
+      if (currentState.modal.kind === "project-picker") {
+        if (key.upArrow) {
+          commitState(moveProjectPickerSelection(currentState, currentState.storyProjects.length, -1));
+          return;
+        }
+
+        if (key.downArrow) {
+          commitState(moveProjectPickerSelection(currentState, currentState.storyProjects.length, 1));
+          return;
+        }
+
+        if (key.return) {
+          commitState(handleProjectPickerSubmit(currentState, Date.now()));
+        }
+
+        return;
+      }
+
       const filteredModelIds = getFilteredModelIds(currentState);
 
       if (key.upArrow) {
@@ -2713,8 +2782,10 @@ export function App({
       return;
     }
 
+    const showCommandPreview = shouldShowCommandPreview(currentState.inputValue);
+
     if (key.escape) {
-      if (shouldShowCommandPreview(currentState.inputValue)) {
+      if (showCommandPreview) {
         commitState(clearInputValue(currentState));
         return;
       }
@@ -2723,17 +2794,17 @@ export function App({
       return;
     }
 
-    if (!shouldShowCommandPreview(currentState.inputValue) && key.upArrow) {
+    if (!showCommandPreview && key.upArrow) {
       commitState(moveTranscriptScroll(currentState, 1));
       return;
     }
 
-    if (!shouldShowCommandPreview(currentState.inputValue) && key.downArrow) {
+    if (!showCommandPreview && key.downArrow) {
       commitState(moveTranscriptScroll(currentState, -1));
       return;
     }
 
-    if (shouldShowCommandPreview(currentState.inputValue) && key.upArrow) {
+    if (showCommandPreview && key.upArrow) {
       commitState(
         moveCommandSelection(
           currentState,
@@ -2744,7 +2815,7 @@ export function App({
       return;
     }
 
-    if (shouldShowCommandPreview(currentState.inputValue) && key.downArrow) {
+    if (showCommandPreview && key.downArrow) {
       commitState(
         moveCommandSelection(
           currentState,
@@ -2775,7 +2846,7 @@ export function App({
       return;
     }
 
-    if (key.tab && shouldShowCommandPreview(currentState.inputValue)) {
+    if (key.tab && showCommandPreview) {
       const autocompletedValue = getCommandAutocompleteValue(
         currentState.inputValue,
         currentState.commandSelectionIndex

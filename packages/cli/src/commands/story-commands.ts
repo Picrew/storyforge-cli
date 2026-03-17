@@ -71,6 +71,11 @@ export interface StoryCommandOpenResult {
   projectId: string;
 }
 
+export interface StoryCommandProjectPickerResult {
+  type: "project-picker";
+  message: string;
+}
+
 export interface StoryCommandCommitResult {
   type: "commit";
   message: string;
@@ -114,6 +119,7 @@ export type StoryCommandResult =
   | StoryCommandRefreshResult
   | StoryCommandLibraryResult
   | StoryCommandOpenResult
+  | StoryCommandProjectPickerResult
   | StoryCommandCommitResult
   | StoryCommandCiResult
   | StoryCommandRenderResult
@@ -665,11 +671,23 @@ export function handleStoryCommand(
     case "/projects":
     case "/project": {
       if (parsedCommand.args.length === 0) {
+        if (context.projects.length === 0) {
+          return {
+            type: "notice",
+            message: "No saved story projects yet."
+          };
+        }
+
+        return {
+          type: "project-picker",
+          message: "Select a project with ↑↓ and Enter."
+        };
+      }
+
+      if (parsedCommand.command === "/projects" && parsedCommand.args[0] === "list" && parsedCommand.args.length === 1) {
         return {
           type: "library",
-          message: context.projects.length > 0
-            ? "Showing saved story projects."
-            : "No saved story projects yet.",
+          message: "Showing saved story projects.",
           response: buildProjectLibraryResponse(context.projects, context.currentProjectId)
         };
       }
@@ -702,7 +720,9 @@ export function handleStoryCommand(
 
       return {
         type: "notice",
-        message: "Usage: /projects | /projects open <row>"
+        message: parsedCommand.command === "/project"
+          ? "Usage: /project | /project open <row>"
+          : "Usage: /projects | /projects list | /projects open <row>"
       };
     }
 
