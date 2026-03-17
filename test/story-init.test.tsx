@@ -81,6 +81,16 @@ async function submitInput(
   app.stdin.write("\r");
 }
 
+async function sendKey(
+  app: { stdin: { write: (value: string) => void } },
+  key: string
+): Promise<void> {
+  app.stdin.write(key);
+  await new Promise((resolve) => {
+    setTimeout(resolve, 20);
+  });
+}
+
 function createStructuredRunner(
   options: { failStage?: StructuredRunOptions["stage"] } = {}
 ): { runner: StructuredRunner; calls: string[] } {
@@ -260,7 +270,7 @@ describe("story init flow", () => {
     await submitInput(app, "/init");
     await waitForCondition(() => loadStoryWorkspace(cwd).projects.length === 3);
 
-    await submitInput(app, "/projects");
+    await submitInput(app, "/projects list");
     await waitForCondition(() => (app.lastFrame() ?? "").includes("saved story project"));
 
     const listFrame = app.lastFrame() ?? "";
@@ -281,6 +291,42 @@ describe("story init flow", () => {
     expect(workspace.projects).toHaveLength(3);
     expect(loadStoryProject(cwd)?.meta.title).toBe("Untitled Story");
     expect(app.lastFrame()).toContain("Opened Untitled Story.");
+    app.unmount();
+  });
+
+  it("supports opening a project from /project with arrow keys and enter", async () => {
+    const cwd = makeTempDir();
+    const app = render(
+      <App
+        terminalWidthOverride={100}
+        cwdOverride={cwd}
+        initialConfigOverride={{
+          connection: null,
+          model: null
+        }}
+      />
+    );
+
+    await submitInput(app, "/init");
+    await waitForCondition(() => loadStoryWorkspace(cwd).projects.length === 1);
+    const firstProjectId = loadStoryWorkspace(cwd).activeProjectId;
+
+    await submitInput(app, "/init");
+    await waitForCondition(() => loadStoryWorkspace(cwd).projects.length === 2);
+
+    await submitInput(app, "/project");
+    await waitForCondition(() => !(app.lastFrame() ?? "").includes("PROMPT LANE"));
+
+    await sendKey(app, "\u001B[B");
+    await sendKey(app, "\r");
+
+    await waitForCondition(
+      () =>
+        loadStoryWorkspace(cwd).activeProjectId === firstProjectId &&
+        (app.lastFrame() ?? "").includes("Opened Untitled Story.")
+    );
+
+    expect(loadStoryWorkspace(cwd).activeProjectId).toBe(firstProjectId);
     app.unmount();
   });
 

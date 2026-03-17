@@ -60,6 +60,81 @@ describe("story v2 command parsing", () => {
     expect(result.dir).toBeUndefined();
   });
 
+  it("opens interactive picker for /project with saved projects", () => {
+    const project = createReadyProject();
+    const result = handleStoryCommand(
+      {
+        currentProject: project,
+        currentProjectId: "p1",
+        projects: [
+          {
+            id: "p1",
+            title: project.meta.title,
+            status: project.meta.status,
+            createdAt: project.meta.createdAt,
+            updatedAt: project.meta.updatedAt,
+            file: "projects/p1.json"
+          }
+        ]
+      },
+      { command: "/project", args: [] }
+    );
+
+    expect(result).toEqual({
+      type: "project-picker",
+      message: "Select a project with ↑↓ and Enter."
+    });
+  });
+
+  it("opens interactive picker for /projects with saved projects", () => {
+    const project = createReadyProject();
+    const result = handleStoryCommand(
+      {
+        currentProject: project,
+        currentProjectId: "p1",
+        projects: [
+          {
+            id: "p1",
+            title: project.meta.title,
+            status: project.meta.status,
+            createdAt: project.meta.createdAt,
+            updatedAt: project.meta.updatedAt,
+            file: "projects/p1.json"
+          }
+        ]
+      },
+      { command: "/projects", args: [] }
+    );
+
+    expect(result).toEqual({
+      type: "project-picker",
+      message: "Select a project with ↑↓ and Enter."
+    });
+  });
+
+  it("keeps text library output on /projects list", () => {
+    const project = createReadyProject();
+    const result = handleStoryCommand(
+      {
+        currentProject: project,
+        currentProjectId: "p1",
+        projects: [
+          {
+            id: "p1",
+            title: project.meta.title,
+            status: project.meta.status,
+            createdAt: project.meta.createdAt,
+            updatedAt: project.meta.updatedAt,
+            file: "projects/p1.json"
+          }
+        ]
+      },
+      { command: "/projects", args: ["list"] }
+    );
+
+    expect(result.type).toBe("library");
+  });
+
   it("parses /commit with required chapter and force flag", () => {
     const result = handleStoryCommand(
       {

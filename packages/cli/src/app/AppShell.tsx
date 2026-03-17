@@ -9,6 +9,7 @@ import { ConnectAuthModeDialog } from "../components/ConnectAuthModeDialog.js";
 import { ConnectCredentialsDialog } from "../components/ConnectCredentialsDialog.js";
 import { ConnectOauthDialog } from "../components/ConnectOauthDialog.js";
 import { ModelDialog } from "../components/ModelDialog.js";
+import { ProjectDialog } from "../components/ProjectDialog.js";
 import { ProviderDialog } from "../components/ProviderDialog.js";
 import { getProviderMatches, getProviderOption } from "../data/provider-catalog.js";
 import { getContentWidth, shouldCondenseWelcome } from "../layout/viewport.js";
@@ -134,6 +135,14 @@ export function AppShell({
               modelIds={filteredModelIds}
               selectedIndex={state.modal.selectedIndex}
               searchValue={state.modal.searchValue}
+            />
+          ) : null}
+          {state.modal.kind === "project-picker" ? (
+            <ProjectDialog
+              width={overlayWidth}
+              projects={state.storyProjects}
+              currentProjectId={state.storyProjectId}
+              selectedIndex={state.modal.selectedIndex}
             />
           ) : null}
         </Box>
