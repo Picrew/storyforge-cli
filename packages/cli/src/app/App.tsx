@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import React, { useEffect, useRef, useState } from "react";
 import { useApp, useInput, useStdout } from "ink";
@@ -13,7 +14,7 @@ import {
   isExitCommand,
   shouldShowCommandPreview
 } from "../commands/command-preview.js";
-import { buildStorySnapshot } from "../components/StoryPanel.js";
+import { buildStoryTranscriptSnapshot } from "../components/StoryPanel.js";
 import { getProviderMatches, getProviderOption } from "../data/provider-catalog.js";
 import { getContentWidth } from "../layout/viewport.js";
 import {
@@ -162,7 +163,8 @@ export function App({
   const { stdout } = useStdout();
   const terminalWidth = terminalWidthOverride ?? stdout?.columns ?? 80;
   const terminalHeight = stdout?.rows ?? 30;
-  const cwd = cwdOverride ?? process.cwd();
+  const cwdRef = React.useRef(cwdOverride ?? process.cwd());
+  const cwd = cwdRef.current;
   const configPath = configPathOverride ?? getDefaultSessionConfigPath();
   let initialStoryProjectId: string | null = null;
   let initialStoryProjects: readonly StoryLibraryEntry[] = [];
@@ -419,7 +421,7 @@ export function App({
     projectId: string | null,
     projectList: readonly StoryLibraryEntry[]
   ): string =>
-    `${message}\n${buildStorySnapshot(
+    `${message}\n${buildStoryTranscriptSnapshot(
       project,
       activeView,
       getStoryProjectPathLabel(projectId, projectList),
@@ -1577,7 +1579,29 @@ export function App({
       }
 
       if (storyResult.type === "create") {
-        const createResult = createStoryProject(cwd, storyResult.project);
+        if (storyResult.dir) {
+          const resolvedDir = path.isAbsolute(storyResult.dir)
+            ? storyResult.dir
+            : path.resolve(cwd, storyResult.dir);
+
+          try {
+            fs.mkdirSync(resolvedDir, { recursive: true });
+          } catch {
+            return {
+              nextState: setTransientNotice(
+                clearInputValue(currentState),
+                `Failed to create directory: ${resolvedDir}`,
+                now
+              ),
+              shouldExit: false
+            };
+          }
+
+          cwdRef.current = resolvedDir;
+        }
+
+        const activeCwd = cwdRef.current;
+        const createResult = createStoryProject(activeCwd, storyResult.project);
         const nextStateBase: AppState = {
           ...clearInputValue(currentState),
           storyProject: storyResult.project,

@@ -12,6 +12,8 @@ Examples:
 
 ```text
 /init
+/init --dir ~/novels/my-story
+/init --dir ./projects/sci-fi
 /init reset
 /init refresh
 /init refresh world
@@ -19,7 +21,8 @@ Examples:
 
 Behavior:
 
-- `/init` creates a new blank project in the local story library and makes it active
+- `/init` creates a new blank project in the current working directory
+- `/init --dir <path>` creates the project in a custom directory (absolute or relative path). The directory is created automatically if it does not exist. All subsequent commands (`/commit`, `/render`, `/compile`, etc.) will operate in this directory for the rest of the session
 - `/init reset` resets only the active project to a fresh blank scaffold
 - `/init refresh` reruns all generated story tables from the saved brief
 - `/init refresh world|char|timeline|outline` reruns only one section
@@ -160,6 +163,7 @@ Commit one chapter event patch into the structured world state.
 Examples:
 
 ```text
+/commit --chapter ch01
 /commit --chapter ch03 Mira finds the coded ledger in the basement
 /commit --chapter ch03 --patch-file ./patches/ch03.json
 /commit --chapter ch03 Mira finds the coded ledger --force
@@ -168,7 +172,8 @@ Examples:
 Behavior:
 
 - `--chapter` is required and must be `chNN` format
-- with plain event text, Storyforge plans a structured event patch through the current model
+- when no event text is provided, Storyforge uses the chapter's outline (summary + purpose + hook) as the default event description. This means after bootstrapping with `/init`, you can simply run `/commit --chapter ch01` without writing event text
+- with explicit event text, the user-provided text takes priority over the outline
 - with `--patch-file`, Storyforge loads patch JSON directly
 - deterministic CI runs after patch application
 - CI failures block persistence by default, unless `--force` is used

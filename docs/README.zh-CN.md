@@ -127,9 +127,10 @@ opencode --version
 
 常用命令：
 
-- `/init`
+- `/init` — 在当前目录创建
+- `/init --dir ~/novels/my-story` — 在指定目录创建（支持绝对路径和相对路径，目录不存在会自动创建）
 
-说明：`/init` 后第一条普通输入会被当作故事 Brief。
+说明：`/init` 后第一条普通输入会被当作故事 Brief。使用 `--dir` 后，当前会话的所有后续操作（`/commit`、`/render`、`/compile` 等）都会在该目录下进行。
 
 ## 模式 3：结构编辑模式
 
@@ -148,9 +149,10 @@ opencode --version
 
 常用命令：
 
-- `/commit --chapter chNN <event_text>`
+- `/commit --chapter chNN` — 使用 outline 中该章的摘要作为事件描述
+- `/commit --chapter chNN <event_text>` — 使用自定义事件描述
 
-章节号必须是 `ch01`、`ch02` 这种格式。
+章节号必须是 `ch01`、`ch02` 这种格式。不提供事件描述时，自动使用 outline 中该章的 summary + purpose + hook。
 
 ## 模式 5：质量检查模式
 
@@ -210,6 +212,7 @@ storyforge
 
 ```text
 /init
+/init --dir ~/novels/my-story   # 可选：指定项目目录
 ```
 
 随后输入普通文本 Brief（不是命令），示例：
@@ -245,7 +248,15 @@ storyforge
 2. 跑 CI
 3. 渲染正文
 
-第 1 章示例：
+第 1 章示例（直接使用 outline 中的摘要）：
+
+```text
+/commit --chapter ch01
+/ci run
+/render ch01
+```
+
+也可以自定义事件描述：
 
 ```text
 /commit --chapter ch01 林澈在委托人的老照片里发现被涂抹的人影，决定追查底片来源
@@ -256,7 +267,7 @@ storyforge
 第 2 章示例：
 
 ```text
-/commit --chapter ch02 林澈找到冲印店旧服务器，发现三十年前同类案例的匿名档案
+/commit --chapter ch02
 /ci run
 /render ch02
 ```

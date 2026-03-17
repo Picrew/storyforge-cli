@@ -36,6 +36,7 @@ export interface StoryCommandCreateResult {
   message: string;
   activeView: StoryView;
   project: StoryProject;
+  dir?: string;
 }
 
 export interface StoryCommandViewResult {
@@ -565,19 +566,25 @@ export function handleStoryCommand(
 ): StoryCommandResult {
   switch (parsedCommand.command) {
     case "/init": {
-      if (parsedCommand.args.length === 0) {
+      const initParsed = parseCommandFlags(parsedCommand.args);
+      const initDir = initParsed.valueFlags.get("dir")?.trim() || undefined;
+      const initPositional = initParsed.positional;
+
+      if (initPositional.length === 0) {
         const nextProject = createBlankStoryProject(undefined, getUntitledTitle(context.projects));
         nextProject.meta.status = "awaiting_brief";
+        const dirNote = initDir ? ` Project directory: ${initDir}` : "";
 
         return {
           type: "create",
-          message: "Blank story project created. Enter the brief next.",
+          message: `Blank story project created. Enter the brief next.${dirNote}`,
           activeView: "world",
-          project: nextProject
+          project: nextProject,
+          dir: initDir
         };
       }
 
-      if (parsedCommand.args[0] === "reset" && parsedCommand.args.length === 1) {
+      if (initPositional[0] === "reset" && initPositional.length === 1) {
         if (!context.currentProject) {
           return {
             type: "notice",
@@ -594,7 +601,7 @@ export function handleStoryCommand(
         return withView(nextProject, "world", "Current story project reset. Enter the new brief next.");
       }
 
-      if (parsedCommand.args[0] === "refresh") {
+      if (initPositional[0] === "refresh") {
         if (!context.currentProject) {
           return {
             type: "notice",
@@ -609,7 +616,7 @@ export function handleStoryCommand(
           };
         }
 
-        if (parsedCommand.args.length === 1) {
+        if (initPositional.length === 1) {
           return {
             type: "refresh",
             message: "Refreshing all story tables...",
@@ -618,7 +625,7 @@ export function handleStoryCommand(
           };
         }
 
-        if (parsedCommand.args.length === 2) {
+        if (initPositional.length === 2) {
           const scopeMap: Record<string, Exclude<StoryRefreshScope, "all">> = {
             world: "world",
             char: "characters",
@@ -626,7 +633,7 @@ export function handleStoryCommand(
             timeline: "timeline",
             outline: "outline"
           };
-          const scope = scopeMap[parsedCommand.args[1]];
+          const scope = scopeMap[initPositional[1]];
 
           if (!scope) {
             return {
@@ -651,7 +658,7 @@ export function handleStoryCommand(
 
       return {
         type: "notice",
-        message: "Usage: /init | /init reset | /init refresh [world|char|timeline|outline]"
+        message: "Usage: /init [--dir <path>] | /init reset | /init refresh [world|char|timeline|outline]"
       };
     }
 
@@ -958,22 +965,37 @@ export function handleStoryCommand(
       if (!chapterId) {
         return {
           type: "notice",
-          message: "Usage: /commit --chapter chNN <event_text> [--force] | /commit --chapter chNN --patch-file <json_path>"
+          message: "Usage: /commit --chapter chNN [event_text] [--force] | /commit --chapter chNN --patch-file <json_path>"
         };
       }
 
-      if (!patchFilePath && !eventText) {
-        return {
-          type: "notice",
-          message: "Event text is required when --patch-file is not provided."
-        };
+      let resolvedEventText = eventText;
+
+      if (!patchFilePath && !resolvedEventText) {
+        const chapterNumber = Number.parseInt(chapterId.replace(/^ch/i, ""), 10);
+        const chapterPlan = Number.isFinite(chapterNumber)
+          ? context.currentProject.outline.find((entry) => entry.number === chapterNumber)
+          : null;
+
+        if (chapterPlan) {
+          const parts = [chapterPlan.summary, chapterPlan.purpose, chapterPlan.hook].filter(Boolean);
+          resolvedEventText = parts.join(" ");
+        }
+
+        if (!resolvedEventText) {
+          return {
+            type: "notice",
+            message:
+              "No outline found for this chapter. Provide event text: /commit --chapter chNN <event_text>"
+          };
+        }
       }
 
       return {
         type: "commit",
         message: `Committing event patch for ${chapterId}...`,
         chapterId,
-        eventText,
+        eventText: resolvedEventText,
         patchFilePath,
         force
       };

@@ -125,11 +125,12 @@ Common commands:
 
 Purpose: create project and feed the story brief.
 
-Common command:
+Common commands:
 
-- `/init`
+- `/init` — create project in the current directory
+- `/init --dir ~/novels/my-story` — create project in a custom directory (absolute or relative path, auto-created if missing)
 
-After `/init`, the next normal input becomes your brief.
+After `/init`, the next normal input becomes your brief. When `--dir` is used, all subsequent commands (`/commit`, `/render`, `/compile`, etc.) operate in that directory for the session.
 
 ## Mode 3: Structure Editing
 
@@ -148,9 +149,10 @@ Purpose: record chapter-level canonical events.
 
 Common command:
 
-- `/commit --chapter chNN <event_text>`
+- `/commit --chapter chNN` — uses the outline summary as default event description
+- `/commit --chapter chNN <event_text>` — uses custom event text
 
-Chapter id must be in `ch01`, `ch02` format.
+Chapter id must be in `ch01`, `ch02` format. When no event text is provided, the chapter's outline (summary + purpose + hook) is used automatically.
 
 ## Mode 5: Quality / Consistency Check
 
@@ -210,6 +212,7 @@ One-line connection example (OpenRouter):
 
 ```text
 /init
+/init --dir ~/novels/my-story   # optional: specify project directory
 ```
 
 Then input a normal brief text, for example:
@@ -245,7 +248,15 @@ For each chapter:
 2. Run CI
 3. Render prose
 
-Chapter 1 example:
+Chapter 1 example (uses outline summary automatically):
+
+```text
+/commit --chapter ch01
+/ci run
+/render ch01
+```
+
+Or with custom event text:
 
 ```text
 /commit --chapter ch01 Lin Che finds a blurred silhouette in the client's old photos and decides to trace the original film source
@@ -256,7 +267,7 @@ Chapter 1 example:
 Chapter 2 example:
 
 ```text
-/commit --chapter ch02 Lin Che accesses a legacy print-shop server and discovers anonymous records of similar cases from thirty years ago
+/commit --chapter ch02
 /ci run
 /render ch02
 ```

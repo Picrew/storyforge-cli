@@ -17,7 +17,7 @@ export function buildFoundationPrompt(seedPrompt: string): string {
     '  "title": "Short story title",',
     '  "genre": "Genre or subgenre",',
     '  "targetWords": 900,',
-    '  "language": "English",',
+    '  "language": "Language of the user brief (e.g. Chinese, English, Japanese...)",',
     '  "tone": "Tone description",',
     '  "premise": "One concise premise paragraph",',
     '  "world": {',
@@ -34,11 +34,14 @@ export function buildFoundationPrompt(seedPrompt: string): string {
     "- Output JSON only.",
     "- Infer missing fields from the brief.",
     "- Keep each natural-language field concise but useful.",
-    "- Use ASCII double quotes in JSON."
+    "- Use ASCII double quotes in JSON.",
+    "- IMPORTANT: Set the `language` field to the language the user wrote their brief in (e.g. if the brief is in Chinese, set language to \"Chinese\").",
+    "- IMPORTANT: Write ALL natural-language fields (title, genre, tone, premise, and every world field) in the SAME language as the user's brief."
   ].join("\n");
 }
 
 export function buildCharactersPrompt(project: StoryProject): string {
+  const storyLanguage = project.brief.language || "the same language as the story context";
   return [
     "You are a story development editor.",
     "Return valid JSON only.",
@@ -70,11 +73,12 @@ export function buildCharactersPrompt(project: StoryProject): string {
     "Rules:",
     "- Output JSON only.",
     "- Keep descriptions specific and brief.",
-    "- Use the same language as the story context."
+    `- IMPORTANT: Write ALL natural-language field values in ${storyLanguage}. Do not mix languages.`
   ].join("\n");
 }
 
 export function buildTimelinePrompt(project: StoryProject): string {
+  const storyLanguage = project.brief.language || "the same language as the story context";
   return [
     "You are a plot designer.",
     "Return valid JSON only.",
@@ -103,11 +107,12 @@ export function buildTimelinePrompt(project: StoryProject): string {
     "Rules:",
     "- Output JSON only.",
     "- Keep the sequence coherent from setup through resolution.",
-    "- Use the story language."
+    `- IMPORTANT: Write ALL natural-language field values in ${storyLanguage}. Do not mix languages.`
   ].join("\n");
 }
 
 export function buildOutlinePrompt(project: StoryProject): string {
+  const storyLanguage = project.brief.language || "the same language as the story context";
   return [
     "You are a chapter planner.",
     "Return valid JSON only.",
@@ -138,7 +143,8 @@ export function buildOutlinePrompt(project: StoryProject): string {
     "Rules:",
     "- Output JSON only.",
     "- Match the total target word count when distributing chapter sizes.",
-    "- Keep hooks vivid and actionable."
+    "- Keep hooks vivid and actionable.",
+    `- IMPORTANT: Write ALL natural-language field values in ${storyLanguage}. Do not mix languages.`
   ].join("\n");
 }
 
