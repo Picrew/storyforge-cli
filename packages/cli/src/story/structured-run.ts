@@ -12,11 +12,17 @@ import {
   parseOpencodeEvent
 } from "../utils/opencode-events.js";
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface StructuredRunOptions {
   cwd: string;
   model: string;
   prompt: string;
   stage: string;
+  history?: readonly ChatMessage[];
 }
 
 export type StructuredRunner = (options: StructuredRunOptions) => Promise<string>;
@@ -147,7 +153,11 @@ function getOpenRouterErrorMessage(payload: unknown, status: number): string {
   return `OpenRouter request failed with status ${status}.`;
 }
 
-async function runOpenRouterStructuredPrompt(model: string, prompt: string): Promise<string> {
+async function runOpenRouterStructuredPrompt(
+  model: string,
+  prompt: string,
+  history?: readonly ChatMessage[]
+): Promise<string> {
   const apiKey = getOpenRouterApiKey();
 
   if (!apiKey) {
@@ -155,6 +165,16 @@ async function runOpenRouterStructuredPrompt(model: string, prompt: string): Pro
       "OpenRouter API key was not found. Run /connect openrouter <api-key> first, or set OPENROUTER_API_KEY."
     );
   }
+
+  const historyMessages = (history ?? []).map((msg) => ({
+    role: msg.role,
+    content: msg.content
+  }));
+
+  const messages = [
+    ...historyMessages,
+    { role: "user" as const, content: prompt.trim() }
+  ];
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -166,12 +186,7 @@ async function runOpenRouterStructuredPrompt(model: string, prompt: string): Pro
     },
     body: JSON.stringify({
       model: toOpenRouterModelId(model),
-      messages: [
-        {
-          role: "user",
-          content: prompt.trim()
-        }
-      ]
+      messages
     })
   });
 
@@ -285,7 +300,7 @@ export const runStructuredPrompt: StructuredRunner = async (
   const provider = getModelProvider(options.model);
 
   if (provider === "openrouter") {
-    return runOpenRouterStructuredPrompt(options.model, options.prompt);
+    return runOpenRouterStructuredPrompt(options.model, options.prompt, options.history);
   }
 
   return runWithOpencode(options);
