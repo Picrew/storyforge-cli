@@ -8,6 +8,7 @@ import type {
   ModalState,
   OauthFlowMode,
   OauthFlowPhase,
+  ProjectPickerModal,
   SessionConfig
 } from "../types.js";
 
@@ -73,6 +74,13 @@ function updateCredentialsModal(
 function updateOauthModal(
   modal: ConnectOauthModal,
   updater: (currentModal: ConnectOauthModal) => ConnectOauthModal
+): ModalState {
+  return updater(modal);
+}
+
+function updateProjectPickerModal(
+  modal: ProjectPickerModal,
+  updater: (currentModal: ProjectPickerModal) => ProjectPickerModal
 ): ModalState {
   return updater(modal);
 }
@@ -558,6 +566,22 @@ export function openModelPickerModal(
   };
 }
 
+export function openProjectPickerModal(
+  state: AppState,
+  selectedIndex: number = 0
+): AppState {
+  return {
+    ...state,
+    inputValue: "",
+    inputCursorPosition: 0,
+    commandSelectionIndex: 0,
+    modal: {
+      kind: "project-picker",
+      selectedIndex
+    }
+  };
+}
+
 export function setModelPickerSearch(state: AppState, searchValue: string): AppState {
   if (!state.modal || state.modal.kind !== "model-picker") {
     return state;
@@ -588,6 +612,24 @@ export function moveModelPickerSelection(
       ...state.modal,
       selectedIndex: clampIndex(state.modal.selectedIndex + delta, itemCount)
     }
+  };
+}
+
+export function moveProjectPickerSelection(
+  state: AppState,
+  itemCount: number,
+  delta: number
+): AppState {
+  if (!state.modal || state.modal.kind !== "project-picker") {
+    return state;
+  }
+
+  return {
+    ...state,
+    modal: updateProjectPickerModal(state.modal, (currentModal) => ({
+      ...currentModal,
+      selectedIndex: clampIndex(currentModal.selectedIndex + delta, itemCount)
+    }))
   };
 }
 
