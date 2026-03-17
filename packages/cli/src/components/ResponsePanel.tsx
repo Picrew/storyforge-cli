@@ -18,6 +18,8 @@ interface TranscriptLine {
   key: string;
   text: string;
   color: string;
+  suffix?: string;
+  suffixColor?: string;
 }
 
 function pushWrappedLines(
@@ -108,22 +110,29 @@ function buildTranscriptLines(
 
     const isLastTurn = index === lastIndex;
     let statusSuffix = "";
+    let statusColor = "";
     if (isLastTurn) {
       if (turn.streaming) {
         statusSuffix = ` ${spinnerFrame} streaming`;
+        statusColor = themeTokens.accent;
       } else if (pendingTask) {
         statusSuffix = ` ${spinnerFrame} running`;
+        statusColor = themeTokens.accent;
       } else if (turn.failed) {
         statusSuffix = " ✗ failed";
+        statusColor = themeTokens.notice;
       } else {
         statusSuffix = " ✓ done";
+        statusColor = themeTokens.success;
       }
     }
 
     lines.push({
       key: `${turn.id}-meta`,
-      text: `Build ${index + 1} · ${turn.model}${statusSuffix}`,
-      color: themeTokens.accentSecondary
+      text: `Build ${index + 1} · ${turn.model}`,
+      color: themeTokens.accentSecondary,
+      suffix: statusSuffix || undefined,
+      suffixColor: statusColor || undefined
     });
     pushWrappedLines(lines, turn.id, "You", turn.prompt, themeTokens.textPrimary, width);
     pushWrappedLines(
@@ -182,9 +191,10 @@ export function ResponsePanel({
       </Box>
       <Text color={themeTokens.border}>{divider}</Text>
       {visibleTranscript.map((line) => (
-        <Text key={line.key} color={line.color}>
-          {line.text || " "}
-        </Text>
+        <Box key={line.key}>
+          <Text color={line.color}>{line.text || " "}</Text>
+          {line.suffix ? <Text color={line.suffixColor}>{line.suffix}</Text> : null}
+        </Box>
       ))}
       {Array.from({ length: fillerCount }, (_, index) => (
         <Text key={`filler-${index}`} color={themeTokens.textSecondary}>

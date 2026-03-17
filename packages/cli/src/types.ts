@@ -14,6 +14,7 @@ export interface ThemeTokens {
   textSecondary: string;
   border: string;
   notice: string;
+  success: string;
   gradient: readonly string[];
 }
 
