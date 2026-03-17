@@ -86,6 +86,7 @@ export function createInitialAppState(
 ): AppState {
   return {
     inputValue: "",
+    inputCursorPosition: 0,
     transientNotice: null,
     viewportMode: resolveViewportMode(terminalWidth),
     config,
@@ -116,26 +117,83 @@ export function syncViewportMode(state: AppState, terminalWidth: number): AppSta
   };
 }
 
+// Convert character position to string byte offset (for Unicode-safe slicing)
+function charPosToOffset(str: string, charPos: number): number {
+  let offset = 0;
+  let count = 0;
+
+  for (const char of str) {
+    if (count >= charPos) {
+      break;
+    }
+
+    offset += char.length;
+    count += 1;
+  }
+
+  return offset;
+}
+
+function charCount(str: string): number {
+  let count = 0;
+
+  for (const _char of str) {
+    count += 1;
+  }
+
+  return count;
+}
+
 export function appendInputCharacter(state: AppState, input: string): AppState {
   if (!input) {
     return state;
   }
 
+  const len = charCount(state.inputValue);
+  const pos = Math.min(state.inputCursorPosition, len);
+  const offset = charPosToOffset(state.inputValue, pos);
+
   return {
     ...state,
-    inputValue: `${state.inputValue}${input}`,
+    inputValue: state.inputValue.slice(0, offset) + input + state.inputValue.slice(offset),
+    inputCursorPosition: pos + charCount(input),
     commandSelectionIndex: 0
   };
 }
 
 export function deleteInputCharacter(state: AppState): AppState {
-  if (!state.inputValue) {
+  const len = charCount(state.inputValue);
+  const pos = Math.min(state.inputCursorPosition, len);
+
+  if (pos <= 0) {
     return state;
   }
 
+  const offsetBefore = charPosToOffset(state.inputValue, pos - 1);
+  const offsetAt = charPosToOffset(state.inputValue, pos);
+
   return {
     ...state,
-    inputValue: state.inputValue.slice(0, -1),
+    inputValue: state.inputValue.slice(0, offsetBefore) + state.inputValue.slice(offsetAt),
+    inputCursorPosition: pos - 1,
+    commandSelectionIndex: 0
+  };
+}
+
+export function deleteForwardInputCharacter(state: AppState): AppState {
+  const len = charCount(state.inputValue);
+  const pos = Math.min(state.inputCursorPosition, len);
+
+  if (pos >= len) {
+    return state;
+  }
+
+  const offsetAt = charPosToOffset(state.inputValue, pos);
+  const offsetAfter = charPosToOffset(state.inputValue, pos + 1);
+
+  return {
+    ...state,
+    inputValue: state.inputValue.slice(0, offsetAt) + state.inputValue.slice(offsetAfter),
     commandSelectionIndex: 0
   };
 }
@@ -144,6 +202,7 @@ export function replaceInputValue(state: AppState, inputValue: string): AppState
   return {
     ...state,
     inputValue,
+    inputCursorPosition: charCount(inputValue),
     commandSelectionIndex: 0
   };
 }
@@ -156,6 +215,7 @@ export function clearInputValue(state: AppState): AppState {
   return {
     ...state,
     inputValue: "",
+    inputCursorPosition: 0,
     commandSelectionIndex: 0
   };
 }
@@ -193,6 +253,38 @@ export function clearExpiredNotice(state: AppState, now: number = Date.now()): A
   };
 }
 
+export function moveInputCursor(state: AppState, delta: number): AppState {
+  const len = charCount(state.inputValue);
+  const newPos = Math.max(0, Math.min(len, state.inputCursorPosition + delta));
+
+  if (newPos === state.inputCursorPosition) {
+    return state;
+  }
+
+  return {
+    ...state,
+    inputCursorPosition: newPos
+  };
+}
+
+export function moveInputCursorToStart(state: AppState): AppState {
+  if (state.inputCursorPosition === 0) {
+    return state;
+  }
+
+  return { ...state, inputCursorPosition: 0 };
+}
+
+export function moveInputCursorToEnd(state: AppState): AppState {
+  const endPos = charCount(state.inputValue);
+
+  if (state.inputCursorPosition === endPos) {
+    return state;
+  }
+
+  return { ...state, inputCursorPosition: endPos };
+}
+
 export function submitPlainPrompt(state: AppState, now: number = Date.now()): AppState {
   if (!state.inputValue.trim()) {
     return state;
@@ -201,6 +293,7 @@ export function submitPlainPrompt(state: AppState, now: number = Date.now()): Ap
   return {
     ...state,
     inputValue: "",
+    inputCursorPosition: 0,
     commandSelectionIndex: 0,
     transientNotice: createTransientNotice(copy.previewNotice, now)
   };
@@ -216,6 +309,7 @@ export function applyConfigAndNotice(
     ...state,
     config,
     inputValue: "",
+    inputCursorPosition: 0,
     commandSelectionIndex: 0,
     transientNotice: createTransientNotice(message, now)
   };
@@ -225,6 +319,7 @@ export function openConnectProviderModal(state: AppState): AppState {
   return {
     ...state,
     inputValue: "",
+    inputCursorPosition: 0,
     commandSelectionIndex: 0,
     modal: {
       kind: "connect-provider",
@@ -451,6 +546,7 @@ export function openModelPickerModal(
   return {
     ...state,
     inputValue: "",
+    inputCursorPosition: 0,
     commandSelectionIndex: 0,
     modal: {
       kind: "model-picker",
