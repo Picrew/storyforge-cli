@@ -25,7 +25,6 @@ import {
   closeModal,
   createInitialAppState,
   deleteConnectCredentialsCharacter,
-  deleteForwardInputCharacter,
   deleteInputCharacter,
   moveConnectAuthModeSelection,
   moveCommandSelection,
@@ -2668,13 +2667,8 @@ export function App({
 
       // Allow typing in the input while a task is running,
       // so the user can prepare their next prompt.
-      if (key.backspace) {
+      if (key.backspace || key.delete) {
         applyStateUpdate((s) => deleteInputCharacter(s));
-        return;
-      }
-
-      if (key.delete) {
-        applyStateUpdate((s) => deleteForwardInputCharacter(s));
         return;
       }
 
@@ -2770,13 +2764,8 @@ export function App({
       return;
     }
 
-    if (key.backspace) {
+    if (key.backspace || key.delete) {
       applyStateUpdate((nextState) => deleteInputCharacter(nextState));
-      return;
-    }
-
-    if (key.delete) {
-      applyStateUpdate((nextState) => deleteForwardInputCharacter(nextState));
       return;
     }
 
