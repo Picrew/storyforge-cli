@@ -37,23 +37,30 @@ export function Footer({ cwd, width, pendingTask }: FooterProps): React.JSX.Elem
         </Text>
       );
     }
-    return <Text color={themeTokens.textSecondary}>{copy.footer.compact}</Text>;
+    return (
+      <Box>
+        <Text color={themeTokens.success}>✓ </Text>
+        <Text color={themeTokens.textSecondary}>{copy.footer.compact}</Text>
+      </Box>
+    );
   }
 
-  const centerLabel = pendingTask
-    ? `${spinnerFrame} ${formatTaskLabel(pendingTask)} running`
-    : copy.footer.center;
-  const centerColor = pendingTask ? themeTokens.accent : themeTokens.accent;
   const rightLabel = copy.footer.right;
-  const reservedWidth = centerLabel.length + rightLabel.length + 6;
+  const statusIcon = pendingTask ? spinnerFrame : "✓";
+  const statusText = pendingTask
+    ? `${formatTaskLabel(pendingTask)} running`
+    : copy.footer.center;
+  const statusColor = pendingTask ? themeTokens.accent : themeTokens.success;
+  const reservedWidth = statusText.length + rightLabel.length + 10;
   const pathWidth = Math.max(10, width - reservedWidth);
   const displayPath = shortenPath(tildeifyPath(cwd), pathWidth);
 
   return (
-    <Box width={width} justifyContent="space-between">
+    <Box width={width}>
       <Text color={themeTokens.accentSecondary}>{displayPath}</Text>
-      <Text color={centerColor}>[{centerLabel}]</Text>
-      <Text color={themeTokens.textSecondary}>{rightLabel}</Text>
+      <Box flexGrow={1} />
+      <Text color={statusColor}>{statusIcon} {statusText}</Text>
+      <Text color={themeTokens.textSecondary}>{"  "}{rightLabel}</Text>
     </Box>
   );
 }

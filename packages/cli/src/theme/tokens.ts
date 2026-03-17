@@ -7,6 +7,7 @@ export const themeTokens: ThemeTokens = {
   textSecondary: "blackBright",
   border: "#c2410c",
   notice: "#dc2626",
+  success: "#22c55e",
   gradient: ["#ff5a1f", "#ff7a1a", "#ff9f1c", "#ffd17a"]
 };
 
