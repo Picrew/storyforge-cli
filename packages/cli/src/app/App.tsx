@@ -25,10 +25,14 @@ import {
   closeModal,
   createInitialAppState,
   deleteConnectCredentialsCharacter,
+  deleteForwardInputCharacter,
   deleteInputCharacter,
   moveConnectAuthModeSelection,
   moveCommandSelection,
   moveConnectProviderSelection,
+  moveInputCursor,
+  moveInputCursorToEnd,
+  moveInputCursorToStart,
   moveModelPickerSelection,
   moveTranscriptScroll,
   openConnectAuthModeModal,
@@ -62,6 +66,7 @@ import {
 } from "../story/bootstrap.js";
 import {
   runStructuredPrompt,
+  type ChatMessage,
   type StructuredRunner
 } from "../story/structured-run.js";
 import {
@@ -98,6 +103,7 @@ import {
   normalizeAssistantText,
   startOpencodeStream
 } from "../utils/opencode-run.js";
+import { useMouseWheel } from "../components/useMouseWheel.js";
 
 export interface AppProps {
   terminalWidthOverride?: number;
@@ -211,6 +217,10 @@ export function App({
     setState(nextState);
   };
 
+  useMouseWheel((delta) => {
+    applyStateUpdate((currentState) => moveTranscriptScroll(currentState, delta));
+  });
+
   const stopStreamingProcess = (): void => {
     streamRunIdRef.current += 1;
 
@@ -272,6 +282,7 @@ export function App({
       storyProjects: nextProjects,
       activeStoryView,
       inputValue: "",
+      inputCursorPosition: 0,
       commandSelectionIndex: 0
     };
 
@@ -413,8 +424,7 @@ export function App({
       project,
       activeView,
       getStoryProjectPathLabel(projectId, projectList),
-      getStoryTranscriptWidth(),
-      { maxBodyLines: 3 }
+      getStoryTranscriptWidth()
     )}`;
 
   const appendStoryTextEntry = (
@@ -1341,13 +1351,26 @@ export function App({
         pendingEntry
       );
 
+      const chatHistory: ChatMessage[] = currentState.transcript
+        .filter(
+          (entry) =>
+            !entry.failed &&
+            entry.response &&
+            entry.provider !== "storyforge"
+        )
+        .flatMap((entry) => [
+          { role: "user" as const, content: entry.prompt },
+          { role: "assistant" as const, content: entry.response }
+        ]);
+
       void (async () => {
         try {
           const response = await structuredRunner({
             cwd,
             model: currentModel,
             prompt,
-            stage: "chat"
+            stage: "chat",
+            history: chatHistory
           });
 
           if (streamRunIdRef.current !== streamRunId) {
@@ -2433,6 +2456,11 @@ export function App({
       return;
     }
 
+    // Ignore mouse escape sequences that leak through from SGR reporting
+    if (input.includes("[<") || /^\d+;\d+[Mm]/.test(input)) {
+      return;
+    }
+
     const currentState = stateRef.current;
 
     if (currentState.modal) {
@@ -2635,6 +2663,33 @@ export function App({
             expiresAt: Date.now() + 2_500
           }
         });
+        return;
+      }
+
+      // Allow typing in the input while a task is running,
+      // so the user can prepare their next prompt.
+      if (key.backspace) {
+        applyStateUpdate((s) => deleteInputCharacter(s));
+        return;
+      }
+
+      if (key.delete) {
+        applyStateUpdate((s) => deleteForwardInputCharacter(s));
+        return;
+      }
+
+      if (key.leftArrow) {
+        applyStateUpdate((s) => key.ctrl || key.meta ? moveInputCursorToStart(s) : moveInputCursor(s, -1));
+        return;
+      }
+
+      if (key.rightArrow) {
+        applyStateUpdate((s) => key.ctrl || key.meta ? moveInputCursorToEnd(s) : moveInputCursor(s, 1));
+        return;
+      }
+
+      if (!key.ctrl && !key.meta && !key.tab && !key.return && !key.escape && input) {
+        applyStateUpdate((s) => appendInputCharacter(s, input));
       }
 
       return;
@@ -2715,8 +2770,33 @@ export function App({
       return;
     }
 
-    if (key.backspace || key.delete) {
+    if (key.backspace) {
       applyStateUpdate((nextState) => deleteInputCharacter(nextState));
+      return;
+    }
+
+    if (key.delete) {
+      applyStateUpdate((nextState) => deleteForwardInputCharacter(nextState));
+      return;
+    }
+
+    if (key.leftArrow) {
+      if (key.ctrl || key.meta) {
+        applyStateUpdate((nextState) => moveInputCursorToStart(nextState));
+      } else {
+        applyStateUpdate((nextState) => moveInputCursor(nextState, -1));
+      }
+
+      return;
+    }
+
+    if (key.rightArrow) {
+      if (key.ctrl || key.meta) {
+        applyStateUpdate((nextState) => moveInputCursorToEnd(nextState));
+      } else {
+        applyStateUpdate((nextState) => moveInputCursor(nextState, 1));
+      }
+
       return;
     }
 

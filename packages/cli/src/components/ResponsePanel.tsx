@@ -73,13 +73,42 @@ function buildTranscriptLines(
   const lines: TranscriptLine[] = [];
   const lastIndex = turns.length - 1;
 
+  const storyDivider = `${"─".repeat(Math.max(8, width))}`;
+
   turns.forEach((turn, index) => {
     if (index > 0) {
-      lines.push({
-        key: `${turn.id}-gap`,
-        text: "",
-        color: themeTokens.textSecondary
-      });
+      const prevTurn = turns[index - 1];
+      const prevIsStory =
+        prevTurn.provider === "storyforge" &&
+        (prevTurn.model === "story/project" || prevTurn.model === "story/library");
+      const currIsStory =
+        turn.provider === "storyforge" &&
+        (turn.model === "story/project" || turn.model === "story/library");
+
+      if (prevIsStory || currIsStory) {
+        // Prominent separator between story entries
+        lines.push({
+          key: `${turn.id}-gap-top`,
+          text: "",
+          color: themeTokens.textSecondary
+        });
+        lines.push({
+          key: `${turn.id}-divider`,
+          text: storyDivider,
+          color: themeTokens.border
+        });
+        lines.push({
+          key: `${turn.id}-gap-bottom`,
+          text: "",
+          color: themeTokens.textSecondary
+        });
+      } else {
+        lines.push({
+          key: `${turn.id}-gap`,
+          text: "",
+          color: themeTokens.textSecondary
+        });
+      }
     }
 
     const lineColor = turn.failed ? themeTokens.notice : themeTokens.textPrimary;
@@ -89,20 +118,21 @@ function buildTranscriptLines(
 
     if (isLocalStoryEntry) {
       const responseRows = (turn.response || "").split("\n");
-      const headline = responseRows[0] || "";
-      const detail = responseRows.slice(1).join("\n");
+      const message = responseRows[0] || "";
+      const tableContent = responseRows.slice(1).join("\n");
 
+      // Story section header — command + message on one accented line
       pushWrappedLines(
         lines,
         turn.id,
-        "Story",
-        headline ? `${turn.prompt} · ${headline}` : turn.prompt,
-        lineColor,
+        "▸ Story",
+        message ? `${turn.prompt} · ${message}` : turn.prompt,
+        themeTokens.accentSecondary,
         width
       );
 
-      if (detail) {
-        pushPreformattedLines(lines, turn.id, detail, lineColor, width);
+      if (tableContent) {
+        pushPreformattedLines(lines, turn.id, tableContent, lineColor, width);
       }
 
       return;
@@ -148,6 +178,18 @@ function buildTranscriptLines(
   return lines;
 }
 
+function scrollbarChar(
+  rowIndex: number,
+  thumbStart: number,
+  thumbSize: number
+): { char: string; color: string } {
+  if (rowIndex >= thumbStart && rowIndex < thumbStart + thumbSize) {
+    return { char: "█", color: themeTokens.accent };
+  }
+
+  return { char: "│", color: themeTokens.border };
+}
+
 export function ResponsePanel({
   width,
   turns,
@@ -157,10 +199,11 @@ export function ResponsePanel({
 }: ResponsePanelProps): React.JSX.Element {
   const isRunning = Boolean(pendingTask) || Boolean(turns[turns.length - 1]?.streaming);
   const spinnerFrame = useSpinner(isRunning);
-  const divider = "-".repeat(Math.max(12, width - 6));
   const bodyWidth = Math.max(12, width - 6);
-  const allLines = buildTranscriptLines(turns, bodyWidth, pendingTask, spinnerFrame);
   const clampedVisibleLines = Math.max(6, visibleLines);
+  const allLines = buildTranscriptLines(turns, bodyWidth, pendingTask, spinnerFrame);
+  const hasOverflow = allLines.length > clampedVisibleLines;
+  const divider = "-".repeat(Math.max(12, bodyWidth));
   const maxOffset = Math.max(0, allLines.length - clampedVisibleLines);
   const safeOffset = Math.min(scrollOffset, maxOffset);
   const endIndex = Math.max(0, allLines.length - safeOffset);
@@ -175,13 +218,22 @@ export function ResponsePanel({
       : "TRANSCRIPT";
   const badge = safeOffset > 0 ? `scroll ${safeOffset}/${maxOffset}` : `${turns.length} turns`;
 
+  // Scrollbar geometry — thumb shows viewport position within total content
+  const thumbSize = hasOverflow
+    ? Math.max(1, Math.round((clampedVisibleLines / allLines.length) * clampedVisibleLines))
+    : 0;
+  const thumbStart = hasOverflow && maxOffset > 0
+    ? Math.round((startIndex / maxOffset) * (clampedVisibleLines - thumbSize))
+    : 0;
+
   return (
     <Box
       width={width}
       flexDirection="column"
       borderStyle="single"
       borderColor={themeTokens.border}
-      paddingX={2}
+      paddingLeft={2}
+      paddingRight={hasOverflow ? 0 : 2}
     >
       <Box justifyContent="space-between">
         <Text bold color={themeTokens.accent}>
@@ -190,17 +242,32 @@ export function ResponsePanel({
         <Text color={themeTokens.accentSecondary}>{badge}</Text>
       </Box>
       <Text color={themeTokens.border}>{divider}</Text>
-      {visibleTranscript.map((line) => (
-        <Box key={line.key}>
-          <Text color={line.color}>{line.text || " "}</Text>
-          {line.suffix ? <Text color={line.suffixColor}>{line.suffix}</Text> : null}
-        </Box>
-      ))}
-      {Array.from({ length: fillerCount }, (_, index) => (
-        <Text key={`filler-${index}`} color={themeTokens.textSecondary}>
-          {" "}
-        </Text>
-      ))}
+      {visibleTranscript.map((line, rowIndex) => {
+        const sb = hasOverflow ? scrollbarChar(rowIndex, thumbStart, thumbSize) : null;
+
+        return (
+          <Box key={line.key}>
+            <Box flexGrow={1}>
+              <Text color={line.color}>{line.text || " "}</Text>
+              {line.suffix ? <Text color={line.suffixColor}>{line.suffix}</Text> : null}
+            </Box>
+            {sb ? <Text color={sb.color}> {sb.char}</Text> : null}
+          </Box>
+        );
+      })}
+      {Array.from({ length: fillerCount }, (_, index) => {
+        const rowIndex = visibleTranscript.length + index;
+        const sb = hasOverflow ? scrollbarChar(rowIndex, thumbStart, thumbSize) : null;
+
+        return (
+          <Box key={`filler-${index}`}>
+            <Box flexGrow={1}>
+              <Text color={themeTokens.textSecondary}>{" "}</Text>
+            </Box>
+            {sb ? <Text color={sb.color}> {sb.char}</Text> : null}
+          </Box>
+        );
+      })}
     </Box>
   );
 }
