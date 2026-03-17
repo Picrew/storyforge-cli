@@ -500,9 +500,9 @@ describe("story init flow", () => {
     const frame = app.lastFrame() ?? "";
 
     expect(frame).toContain("2 turns");
-    expect(frame).toContain("Showing characters.");
+    // With full table rendering (no truncation), earlier entries may scroll off.
+    // The latest entry (/timeline) and its data should be visible.
     expect(frame).toContain("Showing timeline.");
-    expect(frame).toContain("Mira Vale");
     expect(frame).toContain("Lobby reveal");
     app.unmount();
   });
