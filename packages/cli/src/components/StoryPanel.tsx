@@ -140,6 +140,132 @@ function getBodyLines(project: StoryProject, activeView: StoryView | null, bodyW
   }
 }
 
+// ── Card-format builders for transcript (no column tables) ──────────
+
+function buildWorldCards(project: StoryProject): string[] {
+  const entries: Array<[string, string]> = [
+    ["premise", project.world.premise],
+    ["setting", project.world.setting],
+    ["tone", project.world.tone],
+    ["rules", project.world.rules],
+    ["stakes", project.world.stakes],
+    ["resolution", project.world.resolutionShape]
+  ];
+  const lines: string[] = [];
+
+  for (const [label, value] of entries) {
+    if (!value) {
+      continue;
+    }
+
+    lines.push(`${label}: ${value}`);
+  }
+
+  return lines.length > 0 ? lines : ["No world details yet."];
+}
+
+function buildCharacterCards(project: StoryProject): string[] {
+  if (project.characters.length === 0) {
+    return ["No characters yet."];
+  }
+
+  const lines: string[] = [];
+
+  project.characters.forEach((char, index) => {
+    if (index > 0) {
+      lines.push("");
+    }
+
+    const roleLabel = char.role ? ` · ${char.role}` : "";
+    lines.push(`[${index + 1}] ${char.name}${roleLabel}`);
+
+    if (char.motivation) {
+      lines.push(`    Motivation: ${char.motivation}`);
+    }
+
+    if (char.conflict) {
+      lines.push(`    Conflict: ${char.conflict}`);
+    }
+
+    if (char.arc) {
+      lines.push(`    Arc: ${char.arc}`);
+    }
+  });
+
+  return lines;
+}
+
+function buildTimelineCards(project: StoryProject): string[] {
+  if (project.timeline.length === 0) {
+    return ["No timeline beats yet."];
+  }
+
+  const lines: string[] = [];
+
+  project.timeline.forEach((beat, index) => {
+    if (index > 0) {
+      lines.push("");
+    }
+
+    const chapterLabel = beat.chapterRef ? ` → Ch.${beat.chapterRef}` : "";
+    lines.push(`[${index + 1}] ${beat.label}${chapterLabel}`);
+
+    if (beat.summary) {
+      lines.push(`    ${beat.summary}`);
+    }
+
+    if (beat.stakes) {
+      lines.push(`    Stakes: ${beat.stakes}`);
+    }
+  });
+
+  return lines;
+}
+
+function buildOutlineCards(project: StoryProject): string[] {
+  if (project.outline.length === 0) {
+    return ["No outline rows yet."];
+  }
+
+  const lines: string[] = [];
+
+  project.outline.forEach((chapter, index) => {
+    if (index > 0) {
+      lines.push("");
+    }
+
+    const wordLabel = chapter.targetWords ? ` · ${chapter.targetWords}w` : "";
+    lines.push(`[Ch.${chapter.number}] ${chapter.title}${wordLabel}`);
+
+    if (chapter.purpose) {
+      lines.push(`    Purpose: ${chapter.purpose}`);
+    }
+
+    if (chapter.summary) {
+      lines.push(`    Summary: ${chapter.summary}`);
+    }
+
+    if (chapter.hook) {
+      lines.push(`    Hook: ${chapter.hook}`);
+    }
+  });
+
+  return lines;
+}
+
+function getCardLines(project: StoryProject, activeView: StoryView | null): string[] {
+  switch (activeView ?? "world") {
+    case "world":
+      return buildWorldCards(project);
+    case "characters":
+      return buildCharacterCards(project);
+    case "timeline":
+      return buildTimelineCards(project);
+    case "outline":
+      return buildOutlineCards(project);
+  }
+}
+
 export function buildStorySnapshot(
   project: StoryProject,
   activeView: StoryView | null,
@@ -165,6 +291,25 @@ export function buildStorySnapshot(
       : bodyLines;
 
   return [header, meta, divider, ...visibleBodyLines].join("\n");
+}
+
+export function buildStoryTranscriptSnapshot(
+  project: StoryProject,
+  activeView: StoryView | null,
+  projectPathLabel: string,
+  width: number
+): string {
+  const bodyWidth = Math.max(24, width);
+  const currentView = activeView ?? "world";
+  const header = truncateEndByWidth(`STORY PROJECT | ${project.meta.title}`, bodyWidth);
+  const meta = truncateEndByWidth(
+    `status ${project.meta.status}  view ${currentView}  ${projectPathLabel}`,
+    bodyWidth
+  );
+  const divider = "-".repeat(bodyWidth);
+  const bodyLines = getCardLines(project, activeView);
+
+  return [header, meta, divider, ...bodyLines].join("\n");
 }
 
 export function StoryPanel({

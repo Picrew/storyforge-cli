@@ -9,17 +9,17 @@ function createReadyProject() {
     id: "outline-1",
     number: 1,
     title: "Chapter 1",
-    purpose: "",
-    summary: "",
-    hook: "",
+    purpose: "Introduce the protagonist",
+    summary: "Mira arrives at the conference and meets a stranger.",
+    hook: "The stranger knows her name.",
     targetWords: 600
   });
   project.outline.push({
     id: "outline-2",
     number: 2,
     title: "Chapter 2",
-    purpose: "",
-    summary: "",
+    purpose: "Raise the stakes",
+    summary: "Mira discovers the stranger's true identity.",
     hook: "",
     targetWords: 600
   });
@@ -28,6 +28,38 @@ function createReadyProject() {
 }
 
 describe("story v2 command parsing", () => {
+  it("parses /init --dir and returns dir in create result", () => {
+    const result = handleStoryCommand(
+      { currentProject: null, currentProjectId: null, projects: [] },
+      { command: "/init", args: ["--dir", "~/novels/my-story"] }
+    );
+
+    expect(result.type).toBe("create");
+
+    if (result.type !== "create") {
+      throw new Error("Expected create result.");
+    }
+
+    expect(result.dir).toBe("~/novels/my-story");
+    expect(result.project.meta.status).toBe("awaiting_brief");
+    expect(result.message).toContain("~/novels/my-story");
+  });
+
+  it("returns no dir field for plain /init", () => {
+    const result = handleStoryCommand(
+      { currentProject: null, currentProjectId: null, projects: [] },
+      { command: "/init", args: [] }
+    );
+
+    expect(result.type).toBe("create");
+
+    if (result.type !== "create") {
+      throw new Error("Expected create result.");
+    }
+
+    expect(result.dir).toBeUndefined();
+  });
+
   it("parses /commit with required chapter and force flag", () => {
     const result = handleStoryCommand(
       {
@@ -92,8 +124,55 @@ describe("story v2 command parsing", () => {
 
     expect(result).toEqual({
       type: "notice",
-      message: "Usage: /commit --chapter chNN <event_text> [--force] | /commit --chapter chNN --patch-file <json_path>"
+      message: "Usage: /commit --chapter chNN [event_text] [--force] | /commit --chapter chNN --patch-file <json_path>"
     });
+  });
+
+  it("falls back to outline summary when no event text is given", () => {
+    const result = handleStoryCommand(
+      {
+        currentProject: createReadyProject(),
+        currentProjectId: "p1",
+        projects: []
+      },
+      {
+        command: "/commit",
+        args: ["--chapter", "ch01"]
+      }
+    );
+
+    expect(result.type).toBe("commit");
+
+    if (result.type !== "commit") {
+      throw new Error("Expected commit result.");
+    }
+
+    expect(result.chapterId).toBe("ch01");
+    expect(result.eventText).toContain("Mira arrives at the conference");
+    expect(result.eventText).toContain("Introduce the protagonist");
+    expect(result.eventText).toContain("The stranger knows her name.");
+  });
+
+  it("shows error when no event text and no outline for the chapter", () => {
+    const result = handleStoryCommand(
+      {
+        currentProject: createReadyProject(),
+        currentProjectId: "p1",
+        projects: []
+      },
+      {
+        command: "/commit",
+        args: ["--chapter", "ch99"]
+      }
+    );
+
+    expect(result.type).toBe("notice");
+
+    if (result.type !== "notice") {
+      throw new Error("Expected notice result.");
+    }
+
+    expect(result.message).toContain("No outline found");
   });
 
   it("parses /ci run with commit scope", () => {

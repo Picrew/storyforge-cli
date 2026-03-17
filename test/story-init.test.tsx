@@ -506,4 +506,31 @@ describe("story init flow", () => {
     expect(frame).toContain("Lobby reveal");
     app.unmount();
   });
+
+  it("creates project in custom directory with /init --dir", async () => {
+    const baseCwd = makeTempDir();
+    const targetDir = path.join(baseCwd, "novels", "my-story");
+    const app = render(
+      <App
+        terminalWidthOverride={100}
+        cwdOverride={baseCwd}
+        initialConfigOverride={{
+          connection: null,
+          model: null
+        }}
+      />
+    );
+
+    await submitInput(app, `/init --dir ${targetDir}`);
+    await waitForCondition(() => (app.lastFrame() ?? "").includes("status awaiting_brief"));
+
+    // Project should be created in the target directory, not the base cwd
+    expect(fs.existsSync(path.join(targetDir, ".storyforge"))).toBe(true);
+    expect(fs.existsSync(path.join(baseCwd, ".storyforge"))).toBe(false);
+
+    const project = loadStoryProject(targetDir);
+
+    expect(project?.meta.status).toBe("awaiting_brief");
+    app.unmount();
+  });
 });
