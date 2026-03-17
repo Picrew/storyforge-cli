@@ -22,6 +22,10 @@ import {
   appendInputCharacter,
   createInitialAppState,
   deleteInputCharacter,
+  deleteForwardInputCharacter,
+  moveInputCursor,
+  moveInputCursorToStart,
+  moveInputCursorToEnd,
   openConnectAuthModeModal,
   openConnectProviderModal,
   openModelPickerModal
@@ -68,13 +72,96 @@ describe("Input frame interactions", () => {
     state = appendInputCharacter(state, "t");
 
     let app = render(<AppShell state={state} terminalWidth={100} cwd="/tmp/storyforge" />);
-    expect(app.lastFrame()).toContain("Plot_");
+    expect(app.lastFrame()).toContain("Plot");
     app.unmount();
 
     state = deleteInputCharacter(state);
     app = render(<AppShell state={state} terminalWidth={100} cwd="/tmp/storyforge" />);
-    expect(app.lastFrame()).toContain("Plo_");
+    expect(app.lastFrame()).toContain("Plo");
+    expect(app.lastFrame()).not.toContain("Plot");
     app.unmount();
+  });
+
+  it("supports cursor movement and editing at arbitrary positions", () => {
+    let state = createInitialAppState(100);
+    // Type "hello"
+    state = appendInputCharacter(state, "hello");
+    expect(state.inputValue).toBe("hello");
+    expect(state.inputCursorPosition).toBe(5);
+
+    // Move cursor left 2 positions
+    state = moveInputCursor(state, -2);
+    expect(state.inputCursorPosition).toBe(3);
+
+    // Delete character before cursor (backspace) — removes 'l'
+    state = deleteInputCharacter(state);
+    expect(state.inputValue).toBe("helo");
+    expect(state.inputCursorPosition).toBe(2);
+
+    // Insert 'X' at cursor position
+    state = appendInputCharacter(state, "X");
+    expect(state.inputValue).toBe("heXlo");
+    expect(state.inputCursorPosition).toBe(3);
+
+    // Delete forward (removes 'l')
+    state = deleteForwardInputCharacter(state);
+    expect(state.inputValue).toBe("heXo");
+    expect(state.inputCursorPosition).toBe(3);
+
+    // Move to start
+    state = moveInputCursorToStart(state);
+    expect(state.inputCursorPosition).toBe(0);
+
+    // Move to end
+    state = moveInputCursorToEnd(state);
+    expect(state.inputCursorPosition).toBe(4);
+
+    // Can't go past end
+    state = moveInputCursor(state, 1);
+    expect(state.inputCursorPosition).toBe(4);
+
+    // Can't go before start
+    state = moveInputCursorToStart(state);
+    state = moveInputCursor(state, -1);
+    expect(state.inputCursorPosition).toBe(0);
+
+    // Backspace at position 0 does nothing
+    const unchanged = deleteInputCharacter(state);
+    expect(unchanged.inputValue).toBe("heXo");
+    expect(unchanged.inputCursorPosition).toBe(0);
+  });
+
+  it("handles CJK characters in cursor operations", () => {
+    let state = createInitialAppState(100);
+    state = appendInputCharacter(state, "你好世界");
+    expect(state.inputCursorPosition).toBe(4);
+
+    state = moveInputCursor(state, -2);
+    expect(state.inputCursorPosition).toBe(2);
+
+    state = appendInputCharacter(state, "的");
+    expect(state.inputValue).toBe("你好的世界");
+    expect(state.inputCursorPosition).toBe(3);
+
+    state = deleteInputCharacter(state);
+    expect(state.inputValue).toBe("你好世界");
+    expect(state.inputCursorPosition).toBe(2);
+  });
+
+  it("handles paste (multi-character append) at cursor position", () => {
+    let state = createInitialAppState(100);
+    state = appendInputCharacter(state, "AC");
+    expect(state.inputValue).toBe("AC");
+    expect(state.inputCursorPosition).toBe(2);
+
+    // Move to middle
+    state = moveInputCursor(state, -1);
+    expect(state.inputCursorPosition).toBe(1);
+
+    // Paste "XY" at cursor
+    state = appendInputCharacter(state, "XY");
+    expect(state.inputValue).toBe("AXYC");
+    expect(state.inputCursorPosition).toBe(3);
   });
 
   it("stores provider details when /connect is applied", () => {

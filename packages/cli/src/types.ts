@@ -103,6 +103,7 @@ export interface TranscriptEntry extends LatestExchange {
 
 export interface AppState {
   inputValue: string;
+  inputCursorPosition: number;
   transientNotice: TransientNotice | null;
   viewportMode: ViewportMode;
   config: SessionConfig;

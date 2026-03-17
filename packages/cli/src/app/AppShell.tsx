@@ -170,7 +170,7 @@ export function AppShell({
           </Box>
         ) : null}
         <Box marginTop={1}>
-          <InputFrame width={contentWidth} value={state.inputValue} />
+          <InputFrame width={contentWidth} value={state.inputValue} cursorPosition={state.inputCursorPosition} />
         </Box>
         {showCommandPreview ? (
           <Box marginTop={1}>
