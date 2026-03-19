@@ -1,24 +1,24 @@
-# Storyforge HTTP API
+# Storyforge HTTP API（中文）
 
-**English** | [中文](./api_zh.md)
+[English](./api.md) | **中文**
 
-This document describes Storyforge REST APIs for one-shot generation and step-by-step workflow control.
+本文档用于通过 REST API 调用 Storyforge，覆盖“一键生成”和“分步流程”两种方式。
 
-## Quick Start
+## 快速开始
 
-Start the API server:
+启动 API 服务：
 
 ```bash
 storyforge api serve --port 3210
 ```
 
-Default address:
+默认地址：
 
 ```text
 http://127.0.0.1:3210
 ```
 
-Optional server tuning:
+可选服务端参数（适合批量实验）：
 
 ```bash
 export STORYFORGE_API_OUTPUT_ROOT=/your/custom/output/root
@@ -30,15 +30,15 @@ export STORYFORGE_API_ASYNC_RUN_QUEUE_LIMIT=200
 export STORYFORGE_API_ASYNC_RUN_TIMEOUT_MS=1800000
 ```
 
-Health check:
+健康检查：
 
 ```bash
 curl http://127.0.0.1:3210/api/v1/health
 ```
 
-## Response Envelope
+## 统一响应格式
 
-All endpoints return:
+所有接口都返回：
 
 ```json
 {
@@ -49,12 +49,12 @@ All endpoints return:
 }
 ```
 
-- `code = 0`: success
-- `code != 0`: error
+- `code = 0`：成功
+- `code != 0`：失败
 
-## Model Configuration
+## 模型配置（请求级）
 
-Every request can carry request-level model settings:
+每个请求都可以自带模型配置：
 
 ```json
 "model_config": {
@@ -65,17 +65,17 @@ Every request can carry request-level model settings:
 }
 ```
 
-This makes large-scale experiments easy without local provider state.
+这样你做大规模实验时，不依赖本地固定 provider 配置。
 
-## 1) One-Shot Pipeline
+## 1）一键流程
 
 ### `POST /api/v1/story/run`
 
-- `mode=sync`: wait until completion (server aborts if client disconnects)
-- `mode=async`: return `task_id` immediately, then poll `/api/v1/tasks/:task_id`
-- async runs are protected by watchdog timeout (`STORYFORGE_API_ASYNC_RUN_TIMEOUT_MS`)
+- `mode=sync`：阻塞直到完成（客户端断开时，服务端会中止执行）
+- `mode=async`：立即返回 `task_id`，再轮询 `/api/v1/tasks/:task_id`
+- 异步任务受 watchdog 保护，超过 `STORYFORGE_API_ASYNC_RUN_TIMEOUT_MS` 会失败
 
-### curl (sync)
+### curl（sync）
 
 ```bash
 curl -X POST http://127.0.0.1:3210/api/v1/story/run \
@@ -83,7 +83,7 @@ curl -X POST http://127.0.0.1:3210/api/v1/story/run \
   -d '{
     "mode": "sync",
     "title": "Memory Archive",
-    "prompt": "Write a 4-chapter sci-fi mystery novel.",
+    "prompt": "写一部4章科幻悬疑小说。",
     "model_config": {
       "api_url": "https://api.deepseek.com",
       "api_key": "<YOUR_API_KEY>",
@@ -96,7 +96,7 @@ curl -X POST http://127.0.0.1:3210/api/v1/story/run \
   }'
 ```
 
-### Python (sync)
+### Python（sync）
 
 ```python
 import httpx
@@ -104,7 +104,7 @@ import httpx
 payload = {
     "mode": "sync",
     "title": "Memory Archive",
-    "prompt": "Write a 4-chapter sci-fi mystery novel.",
+    "prompt": "写一部4章科幻悬疑小说。",
     "model_config": {
         "api_url": "https://api.deepseek.com",
         "api_key": "<YOUR_API_KEY>",
@@ -118,7 +118,7 @@ resp.raise_for_status()
 print(resp.json())
 ```
 
-### curl (async submit)
+### curl（async 提交）
 
 ```bash
 curl -X POST http://127.0.0.1:3210/api/v1/story/run \
@@ -126,7 +126,7 @@ curl -X POST http://127.0.0.1:3210/api/v1/story/run \
   -d '{
     "mode": "async",
     "title": "Batch Job",
-    "prompt": "Write a 4-chapter wuxia novel.",
+    "prompt": "写一部4章武侠小说。",
     "model_config": {
       "api_url": "https://api.deepseek.com",
       "api_key": "<YOUR_API_KEY>",
@@ -135,7 +135,7 @@ curl -X POST http://127.0.0.1:3210/api/v1/story/run \
   }'
 ```
 
-### Python (async submit + poll)
+### Python（async 提交 + 轮询）
 
 ```python
 import time
@@ -146,7 +146,7 @@ BASE = "http://127.0.0.1:3210"
 body = {
     "mode": "async",
     "title": "Batch Job",
-    "prompt": "Write a 4-chapter wuxia novel.",
+    "prompt": "写一部4章武侠小说。",
     "model_config": {
         "api_url": "https://api.deepseek.com",
         "api_key": "<YOUR_API_KEY>",
@@ -169,9 +169,7 @@ with httpx.Client(base_url=BASE, timeout=60.0) as client:
         time.sleep(2)
 ```
 
-### Python concurrency (recommended)
-
-Use the provided async batch client:
+### Python 并发调用（推荐）
 
 ```bash
 pip install httpx
@@ -182,15 +180,15 @@ export STORYFORGE_MAX_CONCURRENCY=3
 python3 docs/examples/storyforge_api_batch_async.py
 ```
 
-Script path:
+脚本路径：
 
 - `docs/examples/storyforge_api_batch_async.py`
 
-## 2) Async Task Query
+## 2）异步任务查询
 
 ### `GET /api/v1/tasks/:task_id`
 
-Task status values:
+状态值：
 
 ```text
 queued | running | succeeded | failed
@@ -213,15 +211,15 @@ resp.raise_for_status()
 print(resp.json())
 ```
 
-Notes:
+说明：
 
-- async task states are retained for a TTL window and then evicted.
+- 异步任务状态会保留一段 TTL 时间，到期后会被清理。
 
-## 3) Step Endpoints
+## 3）分步接口
 
-Below is the same operational flow shown in the CLI screenshots, exposed via REST APIs.
+这部分就是你在 CLI 截图里看到的那套流程 API 化版本。
 
-### Common Python helper
+### 通用 Python helper
 
 ```python
 import httpx
@@ -241,7 +239,7 @@ def sf_post(path: str, payload: dict):
 
 ### `POST /api/v1/story/init`
 
-Create project; with `prompt + model_config`, bootstrap runs immediately.
+创建项目；带 `prompt + model_config` 时会立即 bootstrap。
 
 #### curl
 
@@ -251,7 +249,7 @@ curl -X POST http://127.0.0.1:3210/api/v1/story/init \
   -d '{
     "title": "Step Story",
     "output_root": "/Users/lijunjie/Downloads/storyforge/generated-novels",
-    "prompt": "Write a 4-chapter story about memory restoration.",
+    "prompt": "写一部4章记忆修复题材小说。",
     "model_config": {
       "api_url": "https://api.deepseek.com",
       "api_key": "<YOUR_API_KEY>",
@@ -266,7 +264,7 @@ curl -X POST http://127.0.0.1:3210/api/v1/story/init \
 init_data = sf_post("/api/v1/story/init", {
     "title": "Step Story",
     "output_root": "/Users/lijunjie/Downloads/storyforge/generated-novels",
-    "prompt": "Write a 4-chapter story about memory restoration.",
+    "prompt": "写一部4章记忆修复题材小说。",
     "model_config": {
         "api_url": "https://api.deepseek.com",
         "api_key": "<YOUR_API_KEY>",
@@ -279,7 +277,7 @@ project_id = init_data["project_id"]
 
 ### `POST /api/v1/story/refresh`
 
-Refresh structured tables (`scope`: `all|world|characters|char|timeline|outline`).
+刷新结构表（`scope`：`all|world|characters|char|timeline|outline`）。
 
 #### curl
 
@@ -315,7 +313,7 @@ sf_post("/api/v1/story/refresh", {
 
 ### `POST /api/v1/story/edit`
 
-Unified edit endpoint (`table=world|char|timeline|outline`, `action=set|add|remove`).
+统一编辑接口（`table=world|char|timeline|outline`，`action=set|add|remove`）。
 
 #### curl
 
@@ -347,7 +345,7 @@ sf_post("/api/v1/story/edit", {
 
 ### `POST /api/v1/story/commit`
 
-Submit chapter event patch.
+提交章节事件补丁。
 
 #### curl
 
@@ -358,7 +356,7 @@ curl -X POST http://127.0.0.1:3210/api/v1/story/commit \
     "workspace_dir": "<workspace_dir>",
     "project_id": "<project_id>",
     "chapter_id": "ch01",
-    "event_text": "Lin finds a blank childhood photo.",
+    "event_text": "林澈在旧相册里发现童年空白照片。",
     "force": true,
     "model_config": {
       "api_url": "https://api.deepseek.com",
@@ -375,7 +373,7 @@ sf_post("/api/v1/story/commit", {
     "workspace_dir": workspace_dir,
     "project_id": project_id,
     "chapter_id": "ch01",
-    "event_text": "Lin finds a blank childhood photo.",
+    "event_text": "林澈在旧相册里发现童年空白照片。",
     "force": True,
     "model_config": {
         "api_url": "https://api.deepseek.com",
@@ -387,7 +385,7 @@ sf_post("/api/v1/story/commit", {
 
 ### `POST /api/v1/story/ci`
 
-Run narrative CI (`scope=all|commit`).
+运行叙事 CI（`scope=all|commit`）。
 
 #### curl
 
@@ -413,7 +411,7 @@ sf_post("/api/v1/story/ci", {
 
 ### `POST /api/v1/story/render`
 
-Render chapters (`chapter_range` or `chapter_ids`).
+渲染章节（`chapter_range` 或 `chapter_ids`）。
 
 #### curl
 
@@ -451,7 +449,7 @@ sf_post("/api/v1/story/render", {
 
 ### `POST /api/v1/story/compile`
 
-Compile chapters into one manuscript.
+编译章节为整本稿件。
 
 #### curl
 
@@ -478,7 +476,7 @@ compile_data = sf_post("/api/v1/story/compile", {
 print("compiled to:", compile_data["output_path"])
 ```
 
-### End-to-end Python step script
+### 分步流程 Python 完整脚本
 
 ```bash
 pip install httpx
@@ -486,41 +484,41 @@ export DEEPSEEK_API_KEY="<YOUR_API_KEY>"
 python3 docs/examples/storyforge_api_step_workflow.py
 ```
 
-Script path:
+脚本路径：
 
 - `docs/examples/storyforge_api_step_workflow.py`
 
-## Error Codes
+## 常见错误码
 
-- `4001`: validation error
-- `4002`: request body too large
-- `4003`: invalid JSON
-- `4007`: invalid URL encoding for `task_id`
-- `4290`: async task capacity reached
-- `4291`: async queue is full
-- `4990`: task aborted (client disconnect or watchdog timeout)
-- `4040`: project not found
-- `4041`: task not found
-- `5000/5001`: internal error
+- `4001`：参数校验失败
+- `4002`：请求体过大
+- `4003`：JSON 解析失败
+- `4007`：`task_id` URL 编码非法
+- `4290`：异步任务容量已满
+- `4291`：异步队列已满
+- `4990`：任务被中止（客户端断开或 watchdog 超时）
+- `4040`：项目不存在
+- `4041`：任务不存在
+- `5000/5001`：内部错误
 
-## Output Artifacts
+## 输出产物
 
-Default output root:
+默认输出根目录：
 
 ```text
 <current-working-directory>/generated-novels
 ```
 
-Typical artifacts:
+常见产物：
 
 - `.storyforge/projects/<project_id>.json`
 - `.storyforge/chapters/chNN.md`
-- `manuscript.md` or custom compile output
-- `run-summary.json` (one-shot run summary)
+- `manuscript.md` 或自定义输出路径
+- `run-summary.json`（一键流程摘要）
 
-## Security Notes
+## 安全建议
 
-- Never commit real API keys.
-- Inject keys at runtime via env vars or secret manager.
-- Avoid logging plain-text keys.
-- For heavy batch workloads, tune async queue/concurrency/timeout limits.
+- 不要把真实 API key 提交到仓库。
+- 通过环境变量或密钥系统动态注入 key。
+- 避免日志输出明文 key。
+- 大规模压测时建议调优异步并发/队列/超时参数。
