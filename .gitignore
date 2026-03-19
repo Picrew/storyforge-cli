@@ -35,4 +35,6 @@ test-novel4-rerender.ts
 test-novel4-retry.ts
 test-novel9-rerender.ts
 test-novel10-rerender.ts
+test-render-one.ts
+test-storyforge-eval.ts
 test/story-bootstrap-retry.test.ts

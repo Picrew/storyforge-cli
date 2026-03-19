@@ -23,6 +23,7 @@ export interface StructuredRunOptions {
   prompt: string;
   stage: string;
   history?: readonly ChatMessage[];
+  signal?: AbortSignal;
 }
 
 export type StructuredRunner = (options: StructuredRunOptions) => Promise<string>;
@@ -58,6 +59,20 @@ function getOpenRouterApiKey(): string | null {
   }
 
   return readOpenRouterApiKeyFromConfig();
+}
+
+function createAbortError(message: string): Error {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  throw createAbortError("Structured run aborted.");
 }
 
 function toOpenRouterModelId(model: string): string {
@@ -156,8 +171,10 @@ function getOpenRouterErrorMessage(payload: unknown, status: number): string {
 async function runOpenRouterStructuredPrompt(
   model: string,
   prompt: string,
-  history?: readonly ChatMessage[]
+  history?: readonly ChatMessage[],
+  signal?: AbortSignal
 ): Promise<string> {
+  throwIfAborted(signal);
   const apiKey = getOpenRouterApiKey();
 
   if (!apiKey) {
@@ -187,7 +204,8 @@ async function runOpenRouterStructuredPrompt(
     body: JSON.stringify({
       model: toOpenRouterModelId(model),
       messages
-    })
+    }),
+    signal
   });
 
   let payload: unknown = null;
@@ -214,9 +232,11 @@ async function runOpenRouterStructuredPrompt(
 const runWithOpencode: StructuredRunner = async ({
   cwd,
   model,
-  prompt
+  prompt,
+  signal
 }: StructuredRunOptions): Promise<string> =>
   new Promise<string>((resolve, reject) => {
+    throwIfAborted(signal);
     const child = spawn("opencode", ["run", "--format", "json", "-m", model, prompt.trim()], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
@@ -229,6 +249,34 @@ const runWithOpencode: StructuredRunner = async ({
     let stderrBuffer = "";
     let result = "";
     let eventErrorMessage: string | null = null;
+    let settled = false;
+
+    const finalizeResolve = (value: string): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
+
+    const finalizeReject = (error: unknown): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      reject(error);
+    };
+
+    const onAbort = (): void => {
+      child.kill("SIGTERM");
+      finalizeReject(createAbortError("Structured run aborted."));
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     (child.stdout as Readable).on("data", (chunk) => {
       stdoutBuffer += chunk.toString();
@@ -258,7 +306,7 @@ const runWithOpencode: StructuredRunner = async ({
     });
 
     child.on("error", (error) => {
-      reject(error);
+      finalizeReject(error);
     });
 
     child.on("close", (code) => {
@@ -281,16 +329,16 @@ const runWithOpencode: StructuredRunner = async ({
       }
 
       if (eventErrorMessage) {
-        reject(new Error(eventErrorMessage));
+        finalizeReject(new Error(eventErrorMessage));
         return;
       }
 
       if (code !== 0) {
-        reject(new Error(stderrBuffer.trim() || `opencode run exited with status ${code ?? "unknown"}.`));
+        finalizeReject(new Error(stderrBuffer.trim() || `opencode run exited with status ${code ?? "unknown"}.`));
         return;
       }
 
-      resolve(normalizeAssistantText(result));
+      finalizeResolve(normalizeAssistantText(result));
     });
   });
 
@@ -300,7 +348,7 @@ export const runStructuredPrompt: StructuredRunner = async (
   const provider = getModelProvider(options.model);
 
   if (provider === "openrouter") {
-    return runOpenRouterStructuredPrompt(options.model, options.prompt, options.history);
+    return runOpenRouterStructuredPrompt(options.model, options.prompt, options.history, options.signal);
   }
 
   return runWithOpencode(options);
