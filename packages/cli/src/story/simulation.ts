@@ -37,13 +37,54 @@ interface ResolvedPatchPayload {
 const MODEL_PATCH_MAX_ATTEMPTS = 3;
 const MODEL_PATCH_RETRY_BASE_DELAY_MS = 300;
 
-function sleep(delayMs: number): Promise<void> {
+function createAbortError(message: string): Error {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
+}
+
+function getAbortMessage(signal: AbortSignal | undefined, fallback: string): string {
+  const reason = signal?.reason;
+
+  if (reason instanceof Error && reason.message.trim()) {
+    return reason.message.trim();
+  }
+
+  if (typeof reason === "string" && reason.trim()) {
+    return reason.trim();
+  }
+
+  return fallback;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  throw createAbortError(getAbortMessage(signal, "Story run aborted."));
+}
+
+function sleep(delayMs: number, signal: AbortSignal | undefined): Promise<void> {
+  throwIfAborted(signal);
+
   if (delayMs <= 0) {
     return Promise.resolve();
   }
 
-  return new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(createAbortError(getAbortMessage(signal, "Story run aborted.")));
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -134,14 +175,17 @@ async function resolvePatchPayloadFromModel(
     chapterId: string;
     eventText: string;
     runner: StructuredRunner;
+    abortSignal?: AbortSignal;
   }
 ): Promise<ResolvedPatchPayload> {
   for (let attempt = 1; attempt <= MODEL_PATCH_MAX_ATTEMPTS; attempt += 1) {
+    throwIfAborted(options.abortSignal);
     const raw = await options.runner({
       cwd: options.cwd,
       model: options.model,
       prompt: buildCommitPatchPrompt(options.project, options.chapterId, options.eventText),
-      stage: "commit-patch"
+      stage: "commit-patch",
+      signal: options.abortSignal
     });
 
     try {
@@ -162,10 +206,11 @@ async function resolvePatchPayloadFromModel(
 
     if (attempt < MODEL_PATCH_MAX_ATTEMPTS) {
       const delayMs = Math.round(MODEL_PATCH_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1));
-      await sleep(delayMs);
+      await sleep(delayMs, options.abortSignal);
     }
   }
 
+  throwIfAborted(options.abortSignal);
   const fallback = await planPatchWithAgent(options.project, options.chapterId, options.eventText);
 
   return {
@@ -206,6 +251,7 @@ export interface CommitStoryEventOptions {
   patchFilePath: string | null;
   force: boolean;
   runner: StructuredRunner;
+  abortSignal?: AbortSignal;
 }
 
 export interface CommitStoryEventResult {
@@ -222,6 +268,7 @@ function summarizeCiReport(report: StoryCiReport): string {
 }
 
 export async function commitStoryEvent(options: CommitStoryEventOptions): Promise<CommitStoryEventResult> {
+  throwIfAborted(options.abortSignal);
   const normalizedChapterId = normalizeChapterId(options.chapterId);
 
   if (!normalizedChapterId) {
@@ -237,7 +284,8 @@ export async function commitStoryEvent(options: CommitStoryEventOptions): Promis
         project: baseProject,
         chapterId: normalizedChapterId,
         eventText: options.eventText,
-        runner: options.runner
+        runner: options.runner,
+        abortSignal: options.abortSignal
       });
 
   if (patchPayload.patchOps.length === 0) {
@@ -247,6 +295,7 @@ export async function commitStoryEvent(options: CommitStoryEventOptions): Promis
   let applyResult: Awaited<ReturnType<typeof applyPatchWithAgent>>;
 
   try {
+    throwIfAborted(options.abortSignal);
     applyResult = await applyPatchWithAgent(
       baseProject,
       normalizedChapterId,
@@ -274,6 +323,7 @@ export async function commitStoryEvent(options: CommitStoryEventOptions): Promis
     }
 
     patchPayload = fallbackPatchPayload;
+    throwIfAborted(options.abortSignal);
     applyResult = await applyPatchWithAgent(
       baseProject,
       normalizedChapterId,
@@ -284,6 +334,7 @@ export async function commitStoryEvent(options: CommitStoryEventOptions): Promis
   }
 
   const patchedProject = cloneProject(applyResult.next_state);
+  throwIfAborted(options.abortSignal);
   const ciResult = await runCiWithAgent(patchedProject, "commit");
   const ciReport = ciResult.ci_report;
 
@@ -311,6 +362,7 @@ export async function commitStoryEvent(options: CommitStoryEventOptions): Promis
   });
   patchedProject.ciHistory.push(ciReport);
 
+  throwIfAborted(options.abortSignal);
   const impactResult = await buildImpactWithAgent(patchedProject);
   const nextProject = cloneProject(impactResult.next_state);
   nextProject.meta.updatedAt = new Date().toISOString();
@@ -360,6 +412,7 @@ export interface RenderStoryChaptersOptions {
   force: boolean;
   runner: StructuredRunner;
   maxConcurrency?: number;
+  abortSignal?: AbortSignal;
 }
 
 export interface RenderStoryChaptersResult {
@@ -379,6 +432,7 @@ function normalizeConcurrency(value: number | undefined): number {
 async function mapWithConcurrency<TItem, TResult>(
   items: readonly TItem[],
   maxConcurrency: number,
+  abortSignal: AbortSignal | undefined,
   worker: (item: TItem, index: number) => Promise<TResult>
 ): Promise<TResult[]> {
   if (items.length === 0) {
@@ -391,6 +445,7 @@ async function mapWithConcurrency<TItem, TResult>(
 
   const runWorker = async (): Promise<void> => {
     while (nextIndex < items.length) {
+      throwIfAborted(abortSignal);
       const index = nextIndex;
       nextIndex += 1;
       results[index] = await worker(items[index], index);
@@ -553,6 +608,7 @@ function upsertChapterRender(project: StoryProject, chapterId: string, model: st
 }
 
 export async function renderStoryChapters(options: RenderStoryChaptersOptions): Promise<RenderStoryChaptersResult> {
+  throwIfAborted(options.abortSignal);
   const project = cloneProject(options.project);
   const rendered: string[] = [];
   const skipped: string[] = [];
@@ -567,6 +623,7 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
   fs.mkdirSync(chaptersDir, { recursive: true });
 
   for (const token of options.chapterIds) {
+    throwIfAborted(options.abortSignal);
     const chapterId = normalizeChapterId(token);
 
     if (!chapterId) {
@@ -599,7 +656,9 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
   const renderedOutputs = await mapWithConcurrency(
     chaptersToRender,
     maxConcurrency,
+    options.abortSignal,
     async (chapter) => {
+      throwIfAborted(options.abortSignal);
       const promptContext = buildChapterRenderPromptContext(project, chaptersDir, chapter.chapterId);
       const prompt = buildChapterRenderPrompt(
         project,
@@ -612,7 +671,8 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
         cwd: options.cwd,
         model: options.model,
         prompt,
-        stage: `render-${chapter.chapterId}`
+        stage: `render-${chapter.chapterId}`,
+        signal: options.abortSignal
       });
       const chapterPath = path.join(chaptersDir, `${chapter.chapterId}.md`);
       const normalizedChapterText = normalizeRenderedChapterText(chapterText);
