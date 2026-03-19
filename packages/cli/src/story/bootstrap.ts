@@ -33,6 +33,7 @@ export interface StoryTaskOptions {
   scope: StoryRefreshScope;
   maxStageAttempts?: number;
   retryBaseDelayMs?: number;
+  abortSignal?: AbortSignal;
   onStageStart?: (progress: StoryTaskProgress) => void;
   onStageComplete?: (progress: StoryTaskProgress) => void;
 }
@@ -176,13 +177,54 @@ function normalizeRetryBaseDelayMs(value: number | undefined): number {
   return Math.max(0, Math.floor(value));
 }
 
-function sleep(delayMs: number): Promise<void> {
+function createAbortError(message: string): Error {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
+}
+
+function getAbortMessage(signal: AbortSignal | undefined, fallback: string): string {
+  const reason = signal?.reason;
+
+  if (reason instanceof Error && reason.message.trim()) {
+    return reason.message.trim();
+  }
+
+  if (typeof reason === "string" && reason.trim()) {
+    return reason.trim();
+  }
+
+  return fallback;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  throw createAbortError(getAbortMessage(signal, "Story task aborted."));
+}
+
+function sleep(delayMs: number, signal: AbortSignal | undefined): Promise<void> {
+  throwIfAborted(signal);
+
   if (delayMs <= 0) {
     return Promise.resolve();
   }
 
-  return new Promise((resolve) => {
-    setTimeout(resolve, delayMs);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(createAbortError(getAbortMessage(signal, "Story task aborted.")));
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -338,13 +380,16 @@ async function runStage(
   project: StoryProject,
   stage: StoryBootstrapStage
 ): Promise<StoryProject> {
+  throwIfAborted(options.abortSignal);
+
   switch (stage) {
     case "foundation": {
       const raw = await options.runner({
         cwd: options.cwd,
         model: options.model,
         prompt: buildFoundationPrompt(project.brief.seedPrompt),
-        stage
+        stage,
+        signal: options.abortSignal
       });
       const payload = parseStructuredJson<FoundationPayload>(raw);
       return applyFoundationStage(project, payload);
@@ -354,7 +399,8 @@ async function runStage(
         cwd: options.cwd,
         model: options.model,
         prompt: buildCharactersPrompt(project),
-        stage
+        stage,
+        signal: options.abortSignal
       });
       const payload = parseStructuredJson<CharacterPayload>(raw);
       return touchProject({
@@ -367,7 +413,8 @@ async function runStage(
         cwd: options.cwd,
         model: options.model,
         prompt: buildTimelinePrompt(project),
-        stage
+        stage,
+        signal: options.abortSignal
       });
       const payload = parseStructuredJson<TimelinePayload>(raw);
       return touchProject({
@@ -380,7 +427,8 @@ async function runStage(
         cwd: options.cwd,
         model: options.model,
         prompt: buildOutlinePrompt(project),
-        stage
+        stage,
+        signal: options.abortSignal
       });
       const payload = parseStructuredJson<OutlinePayload>(raw);
       return touchProject({
@@ -401,6 +449,8 @@ async function runStageWithRetry(
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    throwIfAborted(options.abortSignal);
+
     try {
       return await runStage(options, project, stage);
     } catch (error) {
@@ -411,7 +461,7 @@ async function runStageWithRetry(
       }
 
       const delayMs = Math.round(retryBaseDelayMs * Math.pow(2, attempt - 1));
-      await sleep(delayMs);
+      await sleep(delayMs, options.abortSignal);
     }
   }
 
@@ -423,6 +473,8 @@ async function runStageWithRetry(
 }
 
 export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTaskResult> {
+  throwIfAborted(options.abortSignal);
+
   if (!options.project.brief.seedPrompt.trim()) {
     throw new Error("No saved story brief was found for this project.");
   }
@@ -430,6 +482,8 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
   let nextProject = cloneProject(options.project);
 
   for (const stage of getStagesForScope(options.scope)) {
+    throwIfAborted(options.abortSignal);
+
     const startProgress = {
       stage,
       view: getProgressView(stage),
