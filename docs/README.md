@@ -6,6 +6,11 @@ This guide is for first-time Storyforge users.
 
 Goal: start from installation and end with one full compiled novel manuscript.
 
+API references:
+
+- [HTTP API (English)](./api.md)
+- [HTTP API（中文）](./api_zh.md)
+
 ![Storyforge preview shell](./assets/storyforge-preview-shell.jpg)
 
 ## What You Will Get

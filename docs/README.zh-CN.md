@@ -6,6 +6,11 @@
 
 目标：从“刚安装”到“产出一本完整小说稿”。
 
+API 文档入口：
+
+- [HTTP API（English）](./api.md)
+- [HTTP API（中文）](./api_zh.md)
+
 ![Storyforge preview shell](./assets/storyforge-preview-shell.jpg)
 
 ## 你会得到什么
