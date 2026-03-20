@@ -1,0 +1,52 @@
+{
+  "workspace_dir": "/Users/lijunjie/Downloads/storyforge/generated-novels/api-run-2026-03-20T04-56-01-619Z-8d20fb18",
+  "project_id": "a58d04f5-d5c6-4b76-b901-4014cad0f637",
+  "ci": {
+    "passed": true,
+    "errors": 0,
+    "warnings": 0
+  },
+  "commits": {
+    "total": 8,
+    "succeeded": 8,
+    "failed": 0,
+    "failures": []
+  },
+  "render": {
+    "chapter_ids": [
+      "ch01",
+      "ch02",
+      "ch03",
+      "ch04",
+      "ch05",
+      "ch06",
+      "ch07",
+      "ch08"
+    ],
+    "rendered": [
+      "ch01",
+      "ch02",
+      "ch03",
+      "ch04",
+      "ch05",
+      "ch06",
+      "ch07",
+      "ch08"
+    ],
+    "skipped": []
+  },
+  "compile": {
+    "compiled_chapters": [
+      "ch01",
+      "ch02",
+      "ch03",
+      "ch04",
+      "ch05",
+      "ch06",
+      "ch07",
+      "ch08"
+    ],
+    "missing_chapters": [],
+    "output_path": "/Users/lijunjie/Downloads/storyforge/generated-novels/api-run-2026-03-20T04-56-01-619Z-8d20fb18/manuscript.md"
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "test_time": "2026-03-20T05:26:34.791222+00:00",
+  "model": "stepfun/step-3.5-flash:free",
+  "provider_url": "https://openrouter.ai/api/v1",
+  "novels": [
+    {
+      "novel_id": "novel-1-quantum",
+      "title": "量子镜像",
+      "success": true,
+      "wall_clock_sec": 1738.0,
+      "task_id": "20e41dd9-975a-4916-9a47-8b76c3a410f6",
+      "workspace_dir": "/Users/lijunjie/Downloads/storyforge/generated-novels/api-run-2026-03-20T04-56-01-619Z-8d20fb18",
+      "manuscript_path": "/Users/lijunjie/Downloads/storyforge/generated-novels/api-run-2026-03-20T04-56-01-619Z-8d20fb18/manuscript.md",
+      "llm_calls": null,
+      "chapter_count": 8,
+      "ci_passed": true,
+      "ci_errors": 0,
+      "ci_warnings": 0,
+      "commit_total": 8,
+      "commit_succeeded": 8,
+      "commit_failed": 0,
+      "rendered_chapters": [
+        "ch01",
+        "ch02",
+        "ch03",
+        "ch04",
+        "ch05",
+        "ch06",
+        "ch07",
+        "ch08"
+      ],
+      "compiled_chapters": [
+        "ch01",
+        "ch02",
+        "ch03",
+        "ch04",
+        "ch05",
+        "ch06",
+        "ch07",
+        "ch08"
+      ],
+      "missing_chapters": [],
+      "error": null
+    },
+    {
+      "novel_id": "novel-2-dunhuang",
+      "title": "敦煌秘卷",
+      "success": false,
+      "wall_clock_sec": 1833.1,
+      "task_id": "ff03cba3-28bc-455b-8da8-cedf7ed50397",
+      "workspace_dir": null,
+      "manuscript_path": null,
+      "llm_calls": null,
+      "chapter_count": null,
+      "ci_passed": null,
+      "ci_errors": null,
+      "ci_warnings": null,
+      "commit_total": null,
+      "commit_succeeded": null,
+      "commit_failed": null,
+      "rendered_chapters": null,
+      "compiled_chapters": null,
+      "missing_chapters": null,
+      "error": "Provider request timed out after 300000ms."
+    }
+  ],
+  "summary": {
+    "total_novels": 2,
+    "succeeded": 1,
+    "failed": 1,
+    "parallel_wall_clock_sec": 1833.1,
+    "total_llm_calls": 0,
+    "total_chapters": 8
+  }
+}
