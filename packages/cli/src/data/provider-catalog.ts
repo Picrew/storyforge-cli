@@ -41,8 +41,9 @@ const providerCatalog: readonly ProviderOption[] = [
     credentialLabel: "OAuth",
     credentialHelperText: "Choose ChatGPT Plus/Pro or API key.",
     fallbackModels: [
-      { id: "openai/gpt-5-codex", title: "gpt-5-codex", subtitle: "Code-first GPT-5" },
-      { id: "openai/gpt-5", title: "gpt-5", subtitle: "General-purpose GPT-5" },
+      { id: "openai/gpt-5.2-codex", title: "gpt-5.2-codex", subtitle: "Latest code-first GPT" },
+      { id: "openai/gpt-5-codex", title: "gpt-5-codex", subtitle: "Stable code-first GPT" },
+      { id: "openai/gpt-5.2", title: "gpt-5.2", subtitle: "General-purpose GPT-5" },
       { id: "openai/gpt-4o", title: "gpt-4o", subtitle: "Fast multimodal fallback" }
     ]
   },
