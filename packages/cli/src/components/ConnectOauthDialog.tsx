@@ -85,6 +85,8 @@ export function ConnectOauthDialog({
               ? flowMode === "headless"
                 ? "Press Enter to start the OpenAI device-code flow."
                 : "Press Enter to start the OpenAI browser verification flow."
+              : providerId === "github-copilot"
+                ? "Press Enter to start GitHub Copilot browser verification."
               : "Press Enter to start the browser verification flow."}
         </Text>
         <Text color={themeTokens.textSecondary}>
@@ -94,6 +96,8 @@ export function ConnectOauthDialog({
               ? flowMode === "headless"
                 ? "Storyforge will generate a code, poll OpenAI, then persist the token in .storyforge."
                 : "Storyforge will open the verification page, wait for the callback, then persist the token in .storyforge."
+              : providerId === "github-copilot"
+                ? "Storyforge opens GitHub's device page, polls for completion, then persists the token in .storyforge."
               : "If a verification URL appears, finish it in the browser and Storyforge will persist the token."}
         </Text>
         {showOpenAIModePicker ? (

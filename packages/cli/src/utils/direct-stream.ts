@@ -4,6 +4,8 @@ import {
   getModelProvider,
   stripProviderPrefix
 } from "./provider-api.js";
+import { streamOpenAICodexResponse } from "./openai-codex-responses.js";
+import { resolveOpenAIOauthRuntimeContext } from "./openai-oauth-runtime.js";
 
 export interface DirectStreamCallbacks {
   onText?: (text: string) => void;
@@ -70,15 +72,6 @@ export function startDirectStream({
     return { abort: () => abortController.abort() };
   }
 
-  const completionUrl = getProviderCompletionUrl(providerId);
-
-  if (!completionUrl) {
-    queueMicrotask(() => {
-      onError?.(`No API endpoint configured for provider "${providerId}".`);
-    });
-    return { abort: () => abortController.abort() };
-  }
-
   const modelId = stripProviderPrefix(model);
 
   const historyMessages = (history ?? []).map((msg) => ({
@@ -90,11 +83,40 @@ export function startDirectStream({
     ...historyMessages,
     { role: "user" as const, content: prompt.trim() }
   ];
+  const openAIOauthRuntime =
+    providerId === "openai" ? resolveOpenAIOauthRuntimeContext(apiKey) : null;
+  const completionUrl = openAIOauthRuntime ? null : getProviderCompletionUrl(providerId);
 
-  const extraHeaders = buildExtraHeaders(providerId);
+  if (!openAIOauthRuntime && !completionUrl) {
+    queueMicrotask(() => {
+      onError?.(`No API endpoint configured for provider "${providerId}".`);
+    });
+    return { abort: () => abortController.abort() };
+  }
 
   void (async () => {
     try {
+      if (openAIOauthRuntime) {
+        await streamOpenAICodexResponse({
+          accessToken: openAIOauthRuntime.accessToken,
+          accountId: openAIOauthRuntime.accountId,
+          model: modelId,
+          prompt,
+          history: historyMessages,
+          signal: abortController.signal,
+          onText
+        });
+        onComplete?.();
+        return;
+      }
+
+      if (!completionUrl) {
+        onError?.(`No API endpoint configured for provider "${providerId}".`);
+        return;
+      }
+
+      const extraHeaders = buildExtraHeaders(providerId);
+
       const response = await fetch(completionUrl, {
         method: "POST",
         headers: {

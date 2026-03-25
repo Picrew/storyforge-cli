@@ -338,13 +338,17 @@ export function openConnectProviderModal(state: AppState): AppState {
   };
 }
 
-export function openConnectOauthModal(state: AppState, providerId: string): AppState {
+export function openConnectOauthModal(
+  state: AppState,
+  providerId: string,
+  flowMode: OauthFlowMode = "browser"
+): AppState {
   return {
     ...state,
     modal: {
       kind: "connect-oauth",
       providerId,
-      flowMode: "browser",
+      flowMode,
       flowPhase: "idle",
       authUrl: null,
       userCode: null,
