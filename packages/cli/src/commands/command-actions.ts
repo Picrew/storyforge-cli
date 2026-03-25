@@ -59,6 +59,7 @@ export function applyConnectCommand(
   nextHistory[connection.provider] = connection;
 
   const nextConfig: SessionConfig = {
+    ...config,
     connection,
     model: nextModel,
     connectionHistory: nextHistory,
@@ -109,6 +110,7 @@ export function applyModelCommand(config: SessionConfig, model: string): Command
 
     return {
       nextConfig: {
+        ...config,
         connection: historicalConnection,
         model,
         connectionHistory: nextHistory,

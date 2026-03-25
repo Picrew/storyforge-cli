@@ -225,6 +225,7 @@ export function App({
   const stateRef = useRef(state);
   const streamProcessRef = useRef<DirectStreamHandle | null>(null);
   const streamRunIdRef = useRef(0);
+  const earlyStreamChunkBufferRef = useRef<Map<number, string>>(new Map());
   const oauthSessionRef = useRef<ManagedOauthSession | null>(null);
   const oauthRunIdRef = useRef(0);
   const storyTaskRunIdRef = useRef(0);
@@ -251,6 +252,7 @@ export function App({
 
   const stopStreamingProcess = (): void => {
     streamRunIdRef.current += 1;
+    earlyStreamChunkBufferRef.current.clear();
 
     if (!streamProcessRef.current) {
       return;
@@ -1785,6 +1787,7 @@ export function App({
     stopStreamingProcess();
     const streamRunId = streamRunIdRef.current + 1;
     streamRunIdRef.current = streamRunId;
+    earlyStreamChunkBufferRef.current.delete(streamRunId);
     const pendingEntry: TranscriptEntry = {
       id: `turn-${Date.now()}-${streamRunId}`,
       prompt,
@@ -1826,19 +1829,35 @@ export function App({
       history: chatHistory,
       onText: (chunk) => {
         if (streamRunIdRef.current !== streamRunId) {
+          earlyStreamChunkBufferRef.current.delete(streamRunId);
           return;
         }
 
         applyStateUpdate((activeState) => {
-          if (!getLatestTranscriptEntry(activeState.transcript)) {
+          const latestEntry = getLatestTranscriptEntry(activeState.transcript);
+
+          if (!latestEntry) {
+            const existingBufferedChunk = earlyStreamChunkBufferRef.current.get(streamRunId) ?? "";
+            earlyStreamChunkBufferRef.current.set(
+              streamRunId,
+              `${existingBufferedChunk}${chunk}`
+            );
             return activeState;
           }
 
-          return updateLatestTranscriptEntry(activeState, (latestEntry) => {
-            const rawResponse = `${latestEntry.rawResponse ?? ""}${chunk}`;
+          const bufferedChunk = earlyStreamChunkBufferRef.current.get(streamRunId);
+
+          if (bufferedChunk) {
+            earlyStreamChunkBufferRef.current.delete(streamRunId);
+          }
+
+          const effectiveChunk = bufferedChunk ? `${bufferedChunk}${chunk}` : chunk;
+
+          return updateLatestTranscriptEntry(activeState, (currentEntry) => {
+            const rawResponse = `${currentEntry.rawResponse ?? ""}${effectiveChunk}`;
 
             return {
-              ...latestEntry,
+              ...currentEntry,
               rawResponse,
               response: normalizeAssistantText(rawResponse),
               streaming: true
@@ -1848,18 +1867,24 @@ export function App({
       },
       onError: (message) => {
         if (streamRunIdRef.current !== streamRunId) {
+          earlyStreamChunkBufferRef.current.delete(streamRunId);
           return;
         }
 
         streamProcessRef.current = null;
         applyStateUpdate((activeState) => {
+          const bufferedChunk = earlyStreamChunkBufferRef.current.get(streamRunId) ?? "";
+          earlyStreamChunkBufferRef.current.delete(streamRunId);
           const nextState = updateLatestTranscriptEntry(activeState, (latestEntry) => ({
             ...latestEntry,
             failed: true,
             streaming: false,
             completedAt: Date.now(),
-            response: latestEntry.response || message,
-            rawResponse: latestEntry.rawResponse || message
+            response: normalizeAssistantText(
+              `${bufferedChunk}${latestEntry.rawResponse ?? latestEntry.response ?? ""}`
+            ) || message,
+            rawResponse:
+              `${bufferedChunk}${latestEntry.rawResponse ?? latestEntry.response ?? ""}` || message
           }));
 
           return {
@@ -1874,11 +1899,14 @@ export function App({
       },
       onComplete: () => {
         if (streamRunIdRef.current !== streamRunId) {
+          earlyStreamChunkBufferRef.current.delete(streamRunId);
           return;
         }
 
         streamProcessRef.current = null;
         applyStateUpdate((activeState) => {
+          const bufferedChunk = earlyStreamChunkBufferRef.current.get(streamRunId) ?? "";
+          earlyStreamChunkBufferRef.current.delete(streamRunId);
           const latestEntry = getLatestTranscriptEntry(activeState.transcript);
 
           if (!latestEntry) {
@@ -1888,15 +1916,15 @@ export function App({
             };
           }
 
-          const normalized = normalizeAssistantText(
-            latestEntry.rawResponse ?? latestEntry.response
-          );
+          const rawResponse =
+            `${bufferedChunk}${latestEntry.rawResponse ?? latestEntry.response ?? ""}`;
+          const normalized = normalizeAssistantText(rawResponse);
 
           return {
             ...updateLatestTranscriptEntry(activeState, (currentEntry) => ({
               ...currentEntry,
               response: normalized,
-              rawResponse: currentEntry.rawResponse ?? currentEntry.response,
+              rawResponse,
               streaming: false,
               completedAt: Date.now()
             })),
