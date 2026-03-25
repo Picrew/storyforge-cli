@@ -168,6 +168,31 @@ function getOpenRouterErrorMessage(payload: unknown, status: number): string {
   return `OpenRouter request failed with status ${status}.`;
 }
 
+const OPENROUTER_TIMEOUT_MS = 60_000;
+const OPENROUTER_MAX_ATTEMPTS = 3;
+const OPENROUTER_TRANSIENT_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+
+function isTransientNetworkError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+
+  return (
+    message.includes("fetch failed") ||
+    message.includes("networkerror") ||
+    message.includes("econnreset") ||
+    message.includes("etimedout") ||
+    message.includes("timed out") ||
+    message.includes("socket hang up")
+  );
+}
+
+function openRouterDelay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function runOpenRouterStructuredPrompt(
   model: string,
   prompt: string,
@@ -193,40 +218,101 @@ async function runOpenRouterStructuredPrompt(
     { role: "user" as const, content: prompt.trim() }
   ];
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://storyforge.local",
-      "X-Title": "Storyforge CLI"
-    },
-    body: JSON.stringify({
-      model: toOpenRouterModelId(model),
-      messages
-    }),
-    signal
+  const body = JSON.stringify({
+    model: toOpenRouterModelId(model),
+    messages
   });
 
-  let payload: unknown = null;
+  let lastError: Error | null = null;
 
-  try {
-    payload = await response.json();
-  } catch {
-    // Response body could not be parsed — payload stays null.
+  for (let attempt = 1; attempt <= OPENROUTER_MAX_ATTEMPTS; attempt += 1) {
+    throwIfAborted(signal);
+
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(() => {
+      timeoutController.abort();
+    }, OPENROUTER_TIMEOUT_MS);
+
+    // Merge caller signal with timeout signal
+    const onCallerAbort = (): void => {
+      timeoutController.abort();
+    };
+
+    signal?.addEventListener("abort", onCallerAbort, { once: true });
+
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://storyforge.local",
+          "X-Title": "Storyforge CLI"
+        },
+        body,
+        signal: timeoutController.signal
+      });
+
+      let payload: unknown = null;
+
+      try {
+        payload = await response.json();
+      } catch {
+        // Response body could not be parsed — payload stays null.
+      }
+
+      if (response.ok) {
+        const content = extractOpenRouterContent(payload);
+
+        if (!content.trim()) {
+          throw new Error("OpenRouter response did not contain text output.");
+        }
+
+        return normalizeAssistantText(content);
+      }
+
+      const errorMessage = getOpenRouterErrorMessage(payload, response.status);
+
+      if (OPENROUTER_TRANSIENT_STATUS.has(response.status) && attempt < OPENROUTER_MAX_ATTEMPTS) {
+        lastError = new Error(errorMessage);
+        await openRouterDelay(500 * (2 ** (attempt - 1)));
+        continue;
+      }
+
+      throw new Error(errorMessage);
+    } catch (error) {
+      if (signal?.aborted) {
+        throw createAbortError("Structured run aborted.");
+      }
+
+      if (error instanceof Error && error.name === "AbortError") {
+        if (attempt < OPENROUTER_MAX_ATTEMPTS) {
+          lastError = new Error(`OpenRouter request timed out (attempt ${attempt}).`);
+          await openRouterDelay(500 * (2 ** (attempt - 1)));
+          continue;
+        }
+
+        throw new Error(`OpenRouter request timed out after ${OPENROUTER_TIMEOUT_MS / 1_000}s.`);
+      }
+
+      if (isTransientNetworkError(error) && attempt < OPENROUTER_MAX_ATTEMPTS) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        await openRouterDelay(500 * (2 ** (attempt - 1)));
+        continue;
+      }
+
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error(String(error));
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", onCallerAbort);
+    }
   }
 
-  if (!response.ok) {
-    throw new Error(getOpenRouterErrorMessage(payload, response.status));
-  }
-
-  const content = extractOpenRouterContent(payload);
-
-  if (!content.trim()) {
-    throw new Error("OpenRouter response did not contain text output.");
-  }
-
-  return normalizeAssistantText(content);
+  throw lastError ?? new Error("OpenRouter request failed.");
 }
 
 const runWithOpencode: StructuredRunner = async ({
