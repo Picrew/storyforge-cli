@@ -16,6 +16,7 @@ export interface CommandPreviewItem {
     | "characters"
     | "timeline"
     | "outline"
+    | "clear"
     | "exit";
   aliases?: readonly string[];
 }
@@ -92,6 +93,11 @@ const commandPreviewItems: readonly CommandPreviewItem[] = [
     command: "/outline",
     description: "Show or edit chapter plan",
     action: "outline"
+  },
+  {
+    command: "/clear",
+    description: "Clear transcript history",
+    action: "clear"
   },
   {
     command: "/exit",

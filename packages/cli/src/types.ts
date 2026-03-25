@@ -113,6 +113,7 @@ export interface LatestExchange {
   rawResponse?: string;
   streaming?: boolean;
   startedAt?: number;
+  completedAt?: number;
 }
 
 export interface TranscriptEntry extends LatestExchange {
