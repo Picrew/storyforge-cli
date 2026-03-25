@@ -43,6 +43,35 @@ function normalizeConnection(value: unknown): SessionConnection | null {
   };
 }
 
+function normalizeConnectionHistory(value: unknown): Record<string, SessionConnection> | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const result: Record<string, SessionConnection> = {};
+
+  for (const [key, entry] of Object.entries(candidate)) {
+    const normalized = normalizeConnection(entry);
+
+    if (normalized) {
+      result[key] = normalized;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function normalizeRecentModels(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const result = value.filter((item): item is string => isNonEmptyString(item)).slice(0, 20);
+
+  return result.length > 0 ? result : undefined;
+}
+
 function normalizeSessionConfig(value: unknown): SessionConfig {
   if (!value || typeof value !== "object") {
     return createEmptySessionConfig();
@@ -52,7 +81,9 @@ function normalizeSessionConfig(value: unknown): SessionConfig {
 
   return {
     connection: normalizeConnection(candidate.connection),
-    model: isNonEmptyString(candidate.model) ? candidate.model.trim() : null
+    model: isNonEmptyString(candidate.model) ? candidate.model.trim() : null,
+    connectionHistory: normalizeConnectionHistory(candidate.connectionHistory),
+    recentModels: normalizeRecentModels(candidate.recentModels)
   };
 }
 

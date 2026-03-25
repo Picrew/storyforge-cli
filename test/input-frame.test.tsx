@@ -179,16 +179,15 @@ describe("Input frame interactions", () => {
       }
     );
 
-    expect(result.nextConfig).toEqual({
-      connection: {
-        provider: "deepseek",
-        authMode: "api",
-        apiKey: "sk-storyforge",
-        baseUrl: null,
-        authLabel: "Saved in .storyforge"
-      },
-      model: null
+    expect(result.nextConfig.connection).toEqual({
+      provider: "deepseek",
+      authMode: "api",
+      apiKey: "sk-storyforge",
+      baseUrl: null,
+      authLabel: "Saved in .storyforge"
     });
+    expect(result.nextConfig.model).toBeNull();
+    expect(result.nextConfig.connectionHistory?.["deepseek"]).toEqual(result.nextConfig.connection);
     expect(result.message).toContain("Connected deepseek.");
   });
 

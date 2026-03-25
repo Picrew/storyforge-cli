@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import type { ModelListEntry } from "../types.js";
 import { themeTokens } from "../theme/tokens.js";
 import { truncateEndByWidth } from "../utils/display-width.js";
 
@@ -9,6 +10,19 @@ interface ModelDialogProps {
   modelIds: readonly string[];
   selectedIndex: number;
   searchValue: string;
+  groupedEntries?: readonly ModelListEntry[];
+}
+
+function buildFlatItemIndices(entries: readonly ModelListEntry[]): number[] {
+  const indices: number[] = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    if (entries[i].kind === "item") {
+      indices.push(i);
+    }
+  }
+
+  return indices;
 }
 
 export function ModelDialog({
@@ -16,9 +30,23 @@ export function ModelDialog({
   providerId,
   modelIds,
   selectedIndex,
-  searchValue
+  searchValue,
+  groupedEntries
 }: ModelDialogProps): React.JSX.Element {
   const valueWidth = Math.max(18, width - 8);
+
+  if (groupedEntries && groupedEntries.length > 0) {
+    return (
+      <GroupedModelDialog
+        width={width}
+        valueWidth={valueWidth}
+        entries={groupedEntries}
+        selectedIndex={selectedIndex}
+        searchValue={searchValue}
+      />
+    );
+  }
+
   const windowSize = 10;
   const safeSelectedIndex =
     modelIds.length > 0 ? Math.min(selectedIndex, modelIds.length - 1) : 0;
@@ -76,6 +104,102 @@ export function ModelDialog({
           {visibleModelIds.length === 0
             ? "0 models"
             : `showing ${startIndex + 1}-${shownEndIndex} of ${modelIds.length}`}
+        </Text>
+      </Box>
+      <Box marginTop={1}>
+        <Text color={themeTokens.accent}>↑↓</Text>
+        <Text color={themeTokens.textSecondary}> move  </Text>
+        <Text color={themeTokens.accent}>enter</Text>
+        <Text color={themeTokens.textSecondary}> select</Text>
+      </Box>
+    </Box>
+  );
+}
+
+interface GroupedModelDialogProps {
+  width: number;
+  valueWidth: number;
+  entries: readonly ModelListEntry[];
+  selectedIndex: number;
+  searchValue: string;
+}
+
+function GroupedModelDialog({
+  width,
+  valueWidth,
+  entries,
+  selectedIndex,
+  searchValue
+}: GroupedModelDialogProps): React.JSX.Element {
+  const itemIndices = buildFlatItemIndices(entries);
+  const totalItems = itemIndices.length;
+  const safeSelectedIndex = totalItems > 0 ? Math.min(selectedIndex, totalItems - 1) : 0;
+  const selectedEntryIndex = itemIndices[safeSelectedIndex] ?? -1;
+
+  const windowSize = 14;
+  const maxStartIndex = Math.max(0, entries.length - windowSize);
+  const startIndex = Math.min(
+    maxStartIndex,
+    Math.max(0, selectedEntryIndex - Math.floor(windowSize / 2))
+  );
+  const visibleEntries = entries.slice(startIndex, startIndex + windowSize);
+
+  return (
+    <Box
+      width={width}
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={themeTokens.textSecondary}
+      paddingX={2}
+      paddingY={1}
+    >
+      <Box justifyContent="space-between">
+        <Text bold color={themeTokens.accentSecondary}>
+          Select model
+        </Text>
+        <Text color={themeTokens.textSecondary}>esc</Text>
+      </Box>
+      <Box marginTop={1}>
+        <Text color={themeTokens.textSecondary}>Search </Text>
+        <Text color={themeTokens.accent}>{searchValue || "_"}</Text>
+      </Box>
+      <Box marginTop={1} flexDirection="column">
+        {visibleEntries.length === 0 ? (
+          <Text color={themeTokens.textSecondary}>  No matching models.</Text>
+        ) : null}
+        {visibleEntries.map((entry, viewIndex) => {
+          const entryIndex = startIndex + viewIndex;
+
+          if (entry.kind === "header") {
+            return (
+              <Box key={`hdr-${entryIndex}`} marginTop={viewIndex > 0 ? 1 : 0}>
+                <Text bold color={themeTokens.accentSecondary}>
+                  {entry.label}
+                </Text>
+              </Box>
+            );
+          }
+
+          const isSelected = entryIndex === selectedEntryIndex;
+
+          const displayId = entry.modelId ?? "";
+
+          return (
+            <Box key={displayId}>
+              <Text color={themeTokens.textSecondary}>  </Text>
+              <Text
+                color={isSelected ? "black" : themeTokens.textPrimary}
+                backgroundColor={isSelected ? themeTokens.accentSecondary : undefined}
+              >
+                {truncateEndByWidth(displayId, valueWidth)}
+              </Text>
+            </Box>
+          );
+        })}
+      </Box>
+      <Box marginTop={1}>
+        <Text color={themeTokens.textSecondary}>
+          {totalItems === 0 ? "0 models" : `${totalItems} models across providers`}
         </Text>
       </Box>
       <Box marginTop={1}>
