@@ -6,6 +6,20 @@ import { themeTokens } from "../theme/tokens.js";
 import { wrapTextByWidth } from "../utils/display-width.js";
 import { useSpinner } from "./useSpinner.js";
 
+function stripProviderFromModel(model: string, provider: string | undefined): string {
+  if (!provider) {
+    return model;
+  }
+
+  const prefix = `${provider}/`;
+
+  if (model.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return model.slice(prefix.length);
+  }
+
+  return model;
+}
+
 interface ResponsePanelProps {
   width: number;
   turns: readonly TranscriptEntry[];
@@ -179,7 +193,7 @@ function buildTranscriptLines(
 
     lines.push({
       key: `${turn.id}-meta`,
-      text: `Build ${index + 1} · ${turn.model}`,
+      text: `Build ${index + 1} · ${stripProviderFromModel(turn.model, turn.provider)}`,
       color: themeTokens.accentSecondary,
       suffix: statusSuffix || undefined,
       suffixColor: statusColor || undefined

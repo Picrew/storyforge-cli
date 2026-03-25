@@ -10,11 +10,15 @@ interface ConnectAuthModeDialogProps {
 
 const options = [
   {
-    label: "ChatGPT Plus/Pro",
-    description: "Open browser verification"
+    label: "ChatGPT Pro/Plus (browser)",
+    description: "Open browser verification flow"
   },
   {
-    label: "API key",
+    label: "ChatGPT Pro/Plus (headless)",
+    description: "Use device code in terminal"
+  },
+  {
+    label: "Manually enter API key",
     description: "Paste a standard API key"
   }
 ] as const;
