@@ -1857,6 +1857,7 @@ export function App({
             ...latestEntry,
             failed: true,
             streaming: false,
+            completedAt: Date.now(),
             response: latestEntry.response || message,
             rawResponse: latestEntry.rawResponse || message
           }));
@@ -1896,7 +1897,8 @@ export function App({
               ...currentEntry,
               response: normalized,
               rawResponse: currentEntry.rawResponse ?? currentEntry.response,
-              streaming: false
+              streaming: false,
+              completedAt: Date.now()
             })),
             pendingTask: null
           };
@@ -2570,6 +2572,16 @@ export function App({
             shouldExit: false
           };
         }
+      case "/clear":
+        return {
+          nextState: {
+            ...clearInputValue(currentState),
+            transcript: [],
+            transcriptScrollOffset: 0,
+            latestExchange: null
+          },
+          shouldExit: false
+        };
       case "/exit":
         return {
           nextState: currentState,
@@ -2611,6 +2623,18 @@ export function App({
     if (selectedItem.action === "models") {
       return {
         nextState: openModelPickerFromHistory(paletteState, now),
+        shouldExit: false
+      };
+    }
+
+    if (selectedItem.action === "clear") {
+      return {
+        nextState: {
+          ...paletteState,
+          transcript: [],
+          transcriptScrollOffset: 0,
+          latestExchange: null
+        },
         shouldExit: false
       };
     }
@@ -3177,6 +3201,7 @@ export function App({
           ...latestEntry,
           failed: true,
           streaming: false,
+          completedAt: Date.now(),
           response: latestEntry.response || "Generation cancelled.",
           rawResponse: latestEntry.rawResponse || "Generation cancelled."
         }));

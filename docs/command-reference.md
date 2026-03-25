@@ -263,6 +263,22 @@ Behavior:
 - default output is `./.storyforge/manuscript/story.md`
 - does not call a model
 
+## `/clear`
+
+Clear the transcript history.
+
+Examples:
+
+```text
+/clear
+```
+
+Behavior:
+
+- clears all conversation entries from the transcript panel
+- does not change the active provider, model, or story project
+- scroll position resets to zero
+
 ## `/exit`
 
 Exit the app.
