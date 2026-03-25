@@ -52,11 +52,48 @@ export function AppShell({
   const authModeProvider = authModeModal ? getProviderOption(authModeModal.providerId) : null;
   const oauthProvider = oauthModal ? getProviderOption(oauthModal.providerId) : null;
   let filteredModelIds: readonly string[] = [];
+  let filteredGroupedEntries: readonly import("../types.js").ModelListEntry[] | undefined;
 
   if (modelModal) {
+    const normalizedSearch = modelModal.searchValue.trim().toLowerCase();
     filteredModelIds = modelModal.modelIds.filter((modelId) =>
-      modelId.toLowerCase().includes(modelModal.searchValue.trim().toLowerCase())
+      modelId.toLowerCase().includes(normalizedSearch)
     );
+
+    if (modelModal.groupedEntries && modelModal.groupedEntries.length > 0) {
+      if (!normalizedSearch) {
+        filteredGroupedEntries = modelModal.groupedEntries;
+      } else {
+        const filtered: import("../types.js").ModelListEntry[] = [];
+        let lastHeader: import("../types.js").ModelListEntry | null = null;
+        let headerHasItems = false;
+
+        for (const entry of modelModal.groupedEntries) {
+          if (entry.kind === "header") {
+            if (lastHeader && headerHasItems) {
+              // keep previous header's items (already pushed)
+            }
+
+            lastHeader = entry;
+            headerHasItems = false;
+          } else if (entry.modelId && entry.modelId.toLowerCase().includes(normalizedSearch)) {
+            if (lastHeader && !headerHasItems) {
+              filtered.push(lastHeader);
+              headerHasItems = true;
+            }
+
+            filtered.push(entry);
+          }
+        }
+
+        if (filtered.length === 0 && normalizedSearch.includes("/") && normalizedSearch.indexOf("/") < normalizedSearch.length - 1) {
+          filtered.push({ kind: "header", label: "Use new model" });
+          filtered.push({ kind: "item", modelId: normalizedSearch });
+        }
+
+        filteredGroupedEntries = filtered.length > 0 ? filtered : undefined;
+      }
+    }
   }
 
   const transcriptTurns =
@@ -135,6 +172,7 @@ export function AppShell({
               modelIds={filteredModelIds}
               selectedIndex={state.modal.selectedIndex}
               searchValue={state.modal.searchValue}
+              groupedEntries={filteredGroupedEntries}
             />
           ) : null}
           {state.modal.kind === "project-picker" ? (

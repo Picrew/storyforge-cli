@@ -36,6 +36,8 @@ export interface SessionConnection {
 export interface SessionConfig {
   connection: SessionConnection | null;
   model: string | null;
+  connectionHistory?: Record<string, SessionConnection>;
+  recentModels?: string[];
 }
 
 export interface ProviderPickerModal {
@@ -72,12 +74,20 @@ export interface ConnectCredentialsModal {
   apiKeyValue: string;
 }
 
+export interface ModelListEntry {
+  kind: "header" | "item";
+  label?: string;
+  modelId?: string;
+}
+
 export interface ModelPickerModal {
   kind: "model-picker";
   providerId: string;
   searchValue: string;
   selectedIndex: number;
   modelIds: readonly string[];
+  groupedEntries?: readonly ModelListEntry[];
+  allModelIds?: readonly string[];
 }
 
 export interface ProjectPickerModal {

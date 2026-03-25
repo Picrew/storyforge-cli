@@ -81,6 +81,7 @@ import type { StoryLibraryEntry, StoryProject } from "../story/types.js";
 import { AppShell } from "./AppShell.js";
 import type {
   AppState,
+  ModelListEntry,
   SessionConfig,
   SessionConnection,
   TranscriptEntry
@@ -100,7 +101,7 @@ import {
   syncOauthCredentialRecord
 } from "../utils/opencode-auth.js";
 import { startOpenAIOauthSession } from "../utils/openai-oauth.js";
-import { getModelOptionsForProvider } from "../utils/opencode-models.js";
+import { fetchModelIdsAsync, getModelOptionsForProvider } from "../utils/opencode-models.js";
 import {
   normalizeAssistantText,
   startOpencodeStream
@@ -118,11 +119,17 @@ export interface AppProps {
 function getAvailableModelIds(config: SessionConfig, providerId: string): readonly string[] {
   const modelIds = getModelOptionsForProvider(providerId).map((model) => model.id);
 
-  if (config.model && !modelIds.includes(config.model)) {
+  if (config.model && !modelIds.includes(config.model) && config.model.startsWith(`${providerId}/`)) {
     return [config.model, ...modelIds];
   }
 
   return modelIds;
+}
+
+function looksLikeModelId(value: string): boolean {
+  const sep = value.indexOf("/");
+
+  return sep > 0 && sep < value.length - 1;
 }
 
 function getFilteredModelIds(state: AppState): readonly string[] {
@@ -136,7 +143,13 @@ function getFilteredModelIds(state: AppState): readonly string[] {
     return state.modal.modelIds;
   }
 
-  return state.modal.modelIds.filter((modelId) => modelId.toLowerCase().includes(normalizedSearch));
+  const matched = state.modal.modelIds.filter((modelId) => modelId.toLowerCase().includes(normalizedSearch));
+
+  if (matched.length === 0 && looksLikeModelId(normalizedSearch)) {
+    return [normalizedSearch];
+  }
+
+  return matched;
 }
 
 function parseCommandInput(inputValue: string): { command: string; args: string[] } | null {
@@ -205,6 +218,8 @@ export function App({
   const oauthSessionRef = useRef<Awaited<ReturnType<typeof startOpenAIOauthSession>> | null>(null);
   const oauthRunIdRef = useRef(0);
   const storyTaskRunIdRef = useRef(0);
+  const modelCacheRef = useRef<Map<string, readonly string[]>>(new Map());
+  const modelFetchingRef = useRef<Set<string>>(new Set());
   const structuredRunner = structuredRunnerOverride ?? runStructuredPrompt;
 
   const applyStateUpdate = (updater: (currentState: AppState) => AppState): void => {
@@ -596,7 +611,7 @@ export function App({
         },
         now
       );
-      const nextState = openModelPickerForCurrentConnection(
+      const nextState = openModelPickerForProvider(
         authSyncError
           ? setTransientNotice(
               connectedState,
@@ -640,7 +655,7 @@ export function App({
           },
           now
         );
-        const nextState = openModelPickerForCurrentConnection(
+        const nextState = openModelPickerForProvider(
           setTransientNotice(
             connectedState,
             cacheSyncError
@@ -725,7 +740,110 @@ export function App({
     return syncApiCredential(connection.provider, connection.apiKey);
   };
 
-  const openModelPickerForCurrentConnection = (currentState: AppState, now: number): AppState => {
+  const rebuildModelPickerWithCache = (
+    currentState: AppState,
+    cache: Map<string, readonly string[]>
+  ): AppState => {
+    if (!currentState.modal || currentState.modal.kind !== "model-picker") {
+      return currentState;
+    }
+
+    const recentModels = currentState.config.recentModels ?? [];
+    const currentProviderId = currentState.config.connection?.provider;
+    const allModelIds: string[] = [];
+    const entries: ModelListEntry[] = [];
+    const usedModelIds = new Set<string>();
+
+    const grouped = new Map<string, string[]>();
+
+    for (const modelId of recentModels) {
+      const sep = modelId.indexOf("/");
+      const provider = sep > 0 ? modelId.slice(0, sep) : currentProviderId ?? "";
+
+      if (!grouped.has(provider)) {
+        grouped.set(provider, []);
+      }
+
+      grouped.get(provider)!.push(modelId);
+    }
+
+    const providerOrder: string[] = [];
+
+    if (currentProviderId) {
+      providerOrder.push(currentProviderId);
+    }
+
+    for (const pid of grouped.keys()) {
+      if (!providerOrder.includes(pid)) {
+        providerOrder.push(pid);
+      }
+    }
+
+    for (const pid of cache.keys()) {
+      if (!providerOrder.includes(pid)) {
+        providerOrder.push(pid);
+      }
+    }
+
+    for (const providerId of providerOrder) {
+      const historyModels = grouped.get(providerId) ?? [];
+      const cachedModels = cache.get(providerId) ?? [];
+      const providerOption = getProviderOption(providerId);
+      const label = providerOption?.title ?? providerId;
+
+      const providerModels = [...historyModels];
+
+      for (const m of cachedModels) {
+        if (!providerModels.includes(m)) {
+          providerModels.push(m);
+        }
+      }
+
+      if (providerModels.length === 0) {
+        continue;
+      }
+
+      entries.push({ kind: "header", label });
+
+      for (const modelId of providerModels) {
+        if (usedModelIds.has(modelId)) {
+          continue;
+        }
+
+        entries.push({ kind: "item", modelId });
+        allModelIds.push(modelId);
+        usedModelIds.add(modelId);
+      }
+    }
+
+    if (allModelIds.length === 0) {
+      return currentState;
+    }
+
+    const prevSelectedModel = currentState.modal.modelIds[currentState.modal.selectedIndex];
+    let selectedIndex = 0;
+
+    if (prevSelectedModel) {
+      const idx = allModelIds.indexOf(prevSelectedModel);
+
+      if (idx >= 0) {
+        selectedIndex = idx;
+      }
+    }
+
+    return {
+      ...currentState,
+      modal: {
+        ...currentState.modal,
+        modelIds: allModelIds,
+        groupedEntries: entries,
+        allModelIds,
+        selectedIndex
+      }
+    };
+  };
+
+  const openModelPickerForProvider = (currentState: AppState, now: number): AppState => {
     if (!currentState.config.connection) {
       return setTransientNotice(currentState, "Run /connect first.", now);
     }
@@ -742,6 +860,71 @@ export function App({
       : 0;
 
     return openModelPickerModal(currentState, providerId, modelIds, selectedIndex);
+  };
+
+  const openModelPickerFromHistory = (currentState: AppState, now: number): AppState => {
+    if (!currentState.config.connection) {
+      return setTransientNotice(currentState, "Run /connect first.", now);
+    }
+
+    const currentProviderId = currentState.config.connection.provider;
+    const recentModels = currentState.config.recentModels ?? [];
+
+    if (recentModels.length === 0) {
+      return openModelPickerForProvider(currentState, now);
+    }
+
+    const allModelIds = [...recentModels];
+    const entries: ModelListEntry[] = [];
+
+    const grouped = new Map<string, string[]>();
+
+    for (const modelId of recentModels) {
+      const sep = modelId.indexOf("/");
+      const provider = sep > 0 ? modelId.slice(0, sep) : currentProviderId;
+
+      if (!grouped.has(provider)) {
+        grouped.set(provider, []);
+      }
+
+      grouped.get(provider)!.push(modelId);
+    }
+
+    const currentGroup = grouped.get(currentProviderId);
+
+    if (currentGroup) {
+      const providerOption = getProviderOption(currentProviderId);
+      entries.push({ kind: "header", label: providerOption?.title ?? currentProviderId });
+
+      for (const modelId of currentGroup) {
+        entries.push({ kind: "item", modelId });
+      }
+    }
+
+    for (const [providerId, models] of grouped) {
+      if (providerId === currentProviderId) {
+        continue;
+      }
+
+      const providerOption = getProviderOption(providerId);
+      entries.push({ kind: "header", label: providerOption?.title ?? providerId });
+
+      for (const modelId of models) {
+        entries.push({ kind: "item", modelId });
+      }
+    }
+
+    let selectedIndex = 0;
+
+    if (currentState.config.model) {
+      const idx = allModelIds.indexOf(currentState.config.model);
+
+      if (idx >= 0) {
+        selectedIndex = idx;
+      }
+    }
+
+    return openModelPickerModal(currentState, currentProviderId, allModelIds, selectedIndex, entries, allModelIds);
   };
 
   const getStoryStageLabel = (stage: StoryBootstrapStage): string => {
@@ -2169,7 +2352,7 @@ export function App({
       case "/models":
         if (parsedCommand.args.length === 0) {
           return {
-            nextState: openModelPickerForCurrentConnection(currentState, now),
+            nextState: openModelPickerFromHistory(currentState, now),
             shouldExit: false
           };
         }
@@ -2248,7 +2431,7 @@ export function App({
 
     if (selectedItem.action === "models") {
       return {
-        nextState: openModelPickerForCurrentConnection(paletteState, now),
+        nextState: openModelPickerFromHistory(paletteState, now),
         shouldExit: false
       };
     }
@@ -2377,7 +2560,7 @@ export function App({
     }
 
     if (loginError && !storedToken) {
-      return openModelPickerForCurrentConnection(
+      return openModelPickerForProvider(
         setTransientNotice(
           connectedState,
           `Imported an existing ${providerOption.title} credential because browser auth could not be reopened here.`,
@@ -2387,7 +2570,7 @@ export function App({
       );
     }
 
-    return openModelPickerForCurrentConnection(connectedState, now);
+    return openModelPickerForProvider(connectedState, now);
   };
 
   const handleConnectCredentialsSubmit = (currentState: AppState, now: number): AppState => {
@@ -2411,7 +2594,7 @@ export function App({
     };
     const persistedState = connectWithSession(closeModal(currentState), connection, now);
 
-    return openModelPickerForCurrentConnection(persistedState, now);
+    return openModelPickerForProvider(persistedState, now);
   };
 
   const handleModelPickerSubmit = (currentState: AppState, now: number): AppState => {
@@ -2431,6 +2614,10 @@ export function App({
 
     if ("error" in outcome) {
       return setTransientNotice(currentState, outcome.error, now);
+    }
+
+    if (outcome.nextConfig.connection) {
+      primeConnectionForRun(outcome.nextConfig.connection);
     }
 
     const nextState = applyConfigAndNotice(
@@ -2523,6 +2710,41 @@ export function App({
       stopOauthSession();
     };
   }, []);
+
+  const isModelPickerOpen = state.modal?.kind === "model-picker";
+
+  useEffect(() => {
+    if (!isModelPickerOpen) {
+      return;
+    }
+
+    const history = stateRef.current.config.connectionHistory;
+
+    if (!history) {
+      return;
+    }
+
+    for (const providerId of Object.keys(history)) {
+      if (modelCacheRef.current.has(providerId) || modelFetchingRef.current.has(providerId)) {
+        continue;
+      }
+
+      modelFetchingRef.current.add(providerId);
+
+      fetchModelIdsAsync(providerId, (fetchedModelIds) => {
+        modelFetchingRef.current.delete(providerId);
+        modelCacheRef.current.set(providerId, fetchedModelIds);
+
+        applyStateUpdate((currentState) => {
+          if (!currentState.modal || currentState.modal.kind !== "model-picker") {
+            return currentState;
+          }
+
+          return rebuildModelPickerWithCache(currentState, modelCacheRef.current);
+        });
+      });
+    }
+  }, [isModelPickerOpen]);
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {

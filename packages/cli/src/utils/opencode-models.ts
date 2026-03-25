@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { getFallbackModels, type ModelOption } from "../data/provider-catalog.js";
 import { getOauthAccessToken } from "./opencode-auth.js";
 import { getDefaultSessionConfigPath, loadSessionConfig } from "./session-config.js";
@@ -101,6 +101,46 @@ function fetchOpenAIModelsSync(): readonly ModelOption[] | null {
   } catch {
     return null;
   }
+}
+
+export function fetchModelIdsAsync(
+  providerId: string,
+  callback: (modelIds: readonly string[]) => void
+): void {
+  const proc = spawn("opencode", ["models", providerId], {
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+
+  let output = "";
+  const timeout = setTimeout(() => {
+    proc.kill();
+  }, 8_000);
+
+  proc.stdout.on("data", (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+
+  proc.on("close", () => {
+    clearTimeout(timeout);
+    const models = output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((id) => (id.includes("/") ? id : `${providerId}/${id}`));
+
+    if (models.length > 0) {
+      callback(models);
+
+      return;
+    }
+
+    callback(getFallbackModels(providerId).map((m) => m.id));
+  });
+
+  proc.on("error", () => {
+    clearTimeout(timeout);
+    callback(getFallbackModels(providerId).map((m) => m.id));
+  });
 }
 
 export function getModelOptionsForProvider(providerId: string): readonly ModelOption[] {
