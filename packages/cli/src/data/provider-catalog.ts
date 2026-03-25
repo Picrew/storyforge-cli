@@ -27,11 +27,18 @@ const providerCatalog: readonly ProviderOption[] = [
     credentialLabel: "API key",
     credentialHelperText: "Enter saves to .storyforge and opens model picker.",
     fallbackModels: [
+      { id: "openai/gpt-5.4", title: "gpt-5.4", subtitle: "Latest general GPT-5 tier" },
       { id: "openai/gpt-5.4-mini", title: "gpt-5.4-mini", subtitle: "ChatGPT Plus/Pro default" },
       { id: "openai/gpt-5.3-codex", title: "gpt-5.3-codex", subtitle: "Advanced coding model" },
       { id: "openai/gpt-5.2-codex", title: "gpt-5.2-codex", subtitle: "Latest code-first GPT" },
+      { id: "openai/gpt-5.1-codex-max", title: "gpt-5.1-codex-max", subtitle: "Max-depth codex" },
+      { id: "openai/gpt-5.1-codex", title: "gpt-5.1-codex", subtitle: "Balanced codex" },
+      { id: "openai/gpt-5.1-codex-mini", title: "gpt-5.1-codex-mini", subtitle: "Fast codex" },
+      { id: "openai/gpt-5.1-chat-latest", title: "gpt-5.1-chat-latest", subtitle: "Rolling chat alias" },
+      { id: "openai/gpt-5.1", title: "gpt-5.1", subtitle: "Stable GPT-5.1" },
       { id: "openai/gpt-5-codex", title: "gpt-5-codex", subtitle: "Stable code-first GPT" },
       { id: "openai/gpt-5.2", title: "gpt-5.2", subtitle: "General-purpose GPT-5" },
+      { id: "openai/gpt-4.1", title: "gpt-4.1", subtitle: "Reliable GPT-4.1 fallback" },
       { id: "openai/gpt-4o", title: "gpt-4o", subtitle: "Fast multimodal fallback" }
     ]
   },

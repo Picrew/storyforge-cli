@@ -56,19 +56,35 @@ export function AppShell({
 
   if (modelModal) {
     const normalizedSearch = modelModal.searchValue.trim().toLowerCase();
-    filteredModelIds = modelModal.modelIds.filter((modelId) =>
+    const sourceModelIds =
+      normalizedSearch.length > 0
+        ? (modelModal.allModelIds ?? modelModal.modelIds)
+        : modelModal.modelIds;
+    filteredModelIds = sourceModelIds.filter((modelId) =>
       modelId.toLowerCase().includes(normalizedSearch)
     );
+    if (
+      filteredModelIds.length === 0 &&
+      normalizedSearch.includes("/") &&
+      normalizedSearch.indexOf("/") < normalizedSearch.length - 1
+    ) {
+      filteredModelIds = [normalizedSearch];
+    }
 
-    if (modelModal.groupedEntries && modelModal.groupedEntries.length > 0) {
+    const sourceGroupedEntries =
+      normalizedSearch.length > 0
+        ? (modelModal.allGroupedEntries ?? modelModal.groupedEntries)
+        : modelModal.groupedEntries;
+
+    if (sourceGroupedEntries && sourceGroupedEntries.length > 0) {
       if (!normalizedSearch) {
-        filteredGroupedEntries = modelModal.groupedEntries;
+        filteredGroupedEntries = sourceGroupedEntries;
       } else {
         const filtered: import("../types.js").ModelListEntry[] = [];
         let lastHeader: import("../types.js").ModelListEntry | null = null;
         let headerHasItems = false;
 
-        for (const entry of modelModal.groupedEntries) {
+        for (const entry of sourceGroupedEntries) {
           if (entry.kind === "header") {
             if (lastHeader && headerHasItems) {
               // keep previous header's items (already pushed)
