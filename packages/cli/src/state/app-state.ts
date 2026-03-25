@@ -5,6 +5,7 @@ import type {
   AppState,
   ConnectCredentialsModal,
   ConnectOauthModal,
+  ModelListEntry,
   ModalState,
   OauthFlowMode,
   OauthFlowPhase,
@@ -549,7 +550,9 @@ export function openModelPickerModal(
   state: AppState,
   providerId: string,
   modelIds: readonly string[],
-  selectedIndex: number = 0
+  selectedIndex: number = 0,
+  groupedEntries?: readonly ModelListEntry[],
+  allModelIds?: readonly string[]
 ): AppState {
   return {
     ...state,
@@ -561,7 +564,9 @@ export function openModelPickerModal(
       providerId,
       searchValue: "",
       selectedIndex,
-      modelIds
+      modelIds,
+      groupedEntries,
+      allModelIds
     }
   };
 }

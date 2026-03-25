@@ -188,6 +188,30 @@ export function syncOauthCredentialRecord(
   return writeAuthStore(store, authPath);
 }
 
+export function getConnectedProviderIds(authPath: string = getDefaultOpencodeAuthPath()): readonly string[] {
+  const store = readAuthStore(authPath);
+
+  return Object.keys(store).filter((key) => {
+    const record = store[key];
+
+    if (!record || typeof record !== "object") {
+      return false;
+    }
+
+    const candidate = record as Partial<CredentialRecord>;
+
+    if (candidate.type === "api" && typeof (candidate as ApiCredentialRecord).key === "string") {
+      return true;
+    }
+
+    if (candidate.type === "oauth" && typeof (candidate as OauthCredentialRecord).access === "string") {
+      return true;
+    }
+
+    return false;
+  });
+}
+
 export function launchOauthLogin(providerId: string): string | null {
   const result = spawnSync("opencode", ["auth", "login", providerId], {
     stdio: "inherit",
