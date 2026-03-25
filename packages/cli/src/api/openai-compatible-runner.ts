@@ -1,6 +1,6 @@
 import {
   normalizeAssistantText
-} from "../utils/opencode-run.js";
+} from "../utils/direct-stream.js";
 import type {
   StructuredRunOptions,
   StructuredRunner

@@ -104,8 +104,9 @@ import { startOpenAIOauthSession } from "../utils/openai-oauth.js";
 import { fetchModelIdsAsync, getModelOptionsForProvider } from "../utils/opencode-models.js";
 import {
   normalizeAssistantText,
-  startOpencodeStream
-} from "../utils/opencode-run.js";
+  startDirectStream,
+  type DirectStreamHandle
+} from "../utils/direct-stream.js";
 import { useMouseWheel } from "../components/useMouseWheel.js";
 
 export interface AppProps {
@@ -213,7 +214,7 @@ export function App({
       : initialState;
   });
   const stateRef = useRef(state);
-  const streamProcessRef = useRef<ReturnType<typeof startOpencodeStream> | null>(null);
+  const streamProcessRef = useRef<DirectStreamHandle | null>(null);
   const streamRunIdRef = useRef(0);
   const oauthSessionRef = useRef<Awaited<ReturnType<typeof startOpenAIOauthSession>> | null>(null);
   const oauthRunIdRef = useRef(0);
@@ -246,7 +247,7 @@ export function App({
       return;
     }
 
-    streamProcessRef.current.kill();
+    streamProcessRef.current.abort();
     streamProcessRef.current = null;
   };
 
@@ -660,7 +661,7 @@ export function App({
             connectedState,
             cacheSyncError
               ? `OpenAI browser auth failed, and the fallback credential imported but could not refresh the local oauth cache: ${cacheSyncError}`
-              : "OpenAI browser auth failed, so Storyforge imported the existing local opencode credential instead.",
+              : "OpenAI browser auth failed, so Storyforge imported the existing local credential instead.",
             now
           ),
           now
@@ -718,7 +719,7 @@ export function App({
         latestExchange:
           getLatestTranscriptEntry(currentState.transcript) ?? currentState.latestExchange,
         pendingTask: null,
-        opencodeSessionId: null
+        chatSessionId: null
       },
       connectResult.nextConfig,
       connectResult.message,
@@ -1511,95 +1512,6 @@ export function App({
       return initialState;
     }
 
-    if (currentModel.toLowerCase().startsWith("openrouter/")) {
-      stopStreamingProcess();
-      const streamRunId = streamRunIdRef.current + 1;
-      streamRunIdRef.current = streamRunId;
-      const pendingEntry: TranscriptEntry = {
-        id: `turn-${Date.now()}-${streamRunId}`,
-        prompt,
-        response: "",
-        provider: currentConnection.provider,
-        model: currentModel,
-        failed: false,
-        rawResponse: "",
-        streaming: true,
-        startedAt: Date.now()
-      };
-      const initialState = appendTranscriptEntry(
-        {
-          ...clearInputValue(currentState),
-          transientNotice: null,
-          pendingTask: {
-            kind: "chat",
-            stage: null
-          }
-        },
-        pendingEntry
-      );
-
-      const chatHistory: ChatMessage[] = currentState.transcript
-        .filter(
-          (entry) =>
-            !entry.failed &&
-            entry.response &&
-            entry.provider !== "storyforge"
-        )
-        .flatMap((entry) => [
-          { role: "user" as const, content: entry.prompt },
-          { role: "assistant" as const, content: entry.response }
-        ]);
-
-      void (async () => {
-        try {
-          const response = await structuredRunner({
-            cwd,
-            model: currentModel,
-            prompt,
-            stage: "chat",
-            history: chatHistory
-          });
-
-          if (streamRunIdRef.current !== streamRunId) {
-            return;
-          }
-
-          applyStateUpdate((activeState) => ({
-            ...updateLatestTranscriptEntry(activeState, (entry) => ({
-              ...entry,
-              response,
-              rawResponse: response,
-              failed: false,
-              streaming: false
-            })),
-            pendingTask: null
-          }));
-        } catch (error) {
-          if (streamRunIdRef.current !== streamRunId) {
-            return;
-          }
-
-          const message = error instanceof Error ? error.message : String(error);
-          applyStateUpdate((activeState) => ({
-            ...updateLatestTranscriptEntry(activeState, (entry) => ({
-              ...entry,
-              response: entry.response || message,
-              rawResponse: entry.rawResponse || message,
-              failed: true,
-              streaming: false
-            })),
-            pendingTask: null,
-            transientNotice: {
-              message: "Message send failed.",
-              expiresAt: Date.now() + 2_500
-            }
-          }));
-        }
-      })();
-
-      return initialState;
-    }
-
     stopStreamingProcess();
     const streamRunId = streamRunIdRef.current + 1;
     streamRunIdRef.current = streamRunId;
@@ -1626,27 +1538,22 @@ export function App({
       pendingEntry
     );
 
-    streamProcessRef.current = startOpencodeStream({
-      cwd,
+    const chatHistory: ChatMessage[] = currentState.transcript
+      .filter(
+        (entry) =>
+          !entry.failed &&
+          entry.response &&
+          entry.provider !== "storyforge"
+      )
+      .flatMap((entry) => [
+        { role: "user" as const, content: entry.prompt },
+        { role: "assistant" as const, content: entry.response }
+      ]);
+
+    streamProcessRef.current = startDirectStream({
       model: currentModel,
       prompt,
-      sessionId: currentState.opencodeSessionId,
-      onSessionId: (sessionId) => {
-        if (streamRunIdRef.current !== streamRunId) {
-          return;
-        }
-
-        applyStateUpdate((activeState) => {
-          if (activeState.opencodeSessionId === sessionId) {
-            return activeState;
-          }
-
-          return {
-            ...activeState,
-            opencodeSessionId: sessionId
-          };
-        });
-      },
+      history: chatHistory,
       onText: (chunk) => {
         if (streamRunIdRef.current !== streamRunId) {
           return;
@@ -2381,7 +2288,7 @@ export function App({
               ...currentState,
               latestExchange:
                 getLatestTranscriptEntry(currentState.transcript) ?? currentState.latestExchange,
-              opencodeSessionId: null
+              chatSessionId: null
             },
             outcome.nextConfig,
             outcome.message,
@@ -2627,7 +2534,7 @@ export function App({
         ...closeModal(currentState),
         latestExchange:
           getLatestTranscriptEntry(currentState.transcript) ?? currentState.latestExchange,
-        opencodeSessionId: null
+        chatSessionId: null
       },
       outcome.nextConfig,
       outcome.message,
