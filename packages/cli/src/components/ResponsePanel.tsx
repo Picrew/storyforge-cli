@@ -168,7 +168,9 @@ function buildTranscriptLines(
     }
 
     const isLastTurn = index === lastIndex;
-    const elapsed = turn.startedAt ? Date.now() - turn.startedAt : 0;
+    const elapsed = turn.startedAt
+      ? (turn.completedAt ?? Date.now()) - turn.startedAt
+      : 0;
     const elapsedLabel = turn.startedAt && elapsed >= 100 ? ` ${formatElapsed(elapsed)}` : "";
     let statusSuffix = "";
     let statusColor = "";
