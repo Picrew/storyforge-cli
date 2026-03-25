@@ -83,7 +83,8 @@ function normalizeSessionConfig(value: unknown): SessionConfig {
     connection: normalizeConnection(candidate.connection),
     model: isNonEmptyString(candidate.model) ? candidate.model.trim() : null,
     connectionHistory: normalizeConnectionHistory(candidate.connectionHistory),
-    recentModels: normalizeRecentModels(candidate.recentModels)
+    recentModels: normalizeRecentModels(candidate.recentModels),
+    tavilyApiKey: isNonEmptyString(candidate.tavilyApiKey) ? candidate.tavilyApiKey.trim() : undefined
   };
 }
 
