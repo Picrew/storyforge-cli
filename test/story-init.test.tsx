@@ -34,14 +34,14 @@ vi.mock("../packages/cli/src/utils/opencode-auth.js", async () => {
   };
 });
 
-vi.mock("../packages/cli/src/utils/opencode-run.js", async () => {
-  const actual = await vi.importActual<typeof import("../packages/cli/src/utils/opencode-run.js")>(
-    "../packages/cli/src/utils/opencode-run.js"
+vi.mock("../packages/cli/src/utils/direct-stream.js", async () => {
+  const actual = await vi.importActual<typeof import("../packages/cli/src/utils/direct-stream.js")>(
+    "../packages/cli/src/utils/direct-stream.js"
   );
 
   return {
     ...actual,
-    startOpencodeStream: chatStreamSpy
+    startDirectStream: chatStreamSpy
   };
 });
 
@@ -208,7 +208,7 @@ beforeEach(() => {
       });
 
       return {
-        kill: vi.fn()
+        abort: vi.fn()
       };
     }
   );

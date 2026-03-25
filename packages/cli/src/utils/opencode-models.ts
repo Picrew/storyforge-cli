@@ -1,33 +1,10 @@
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { getFallbackModels, type ModelOption } from "../data/provider-catalog.js";
-import { getOauthAccessToken } from "./opencode-auth.js";
-import { getDefaultSessionConfigPath, loadSessionConfig } from "./session-config.js";
-
-function createModelOption(modelId: string): ModelOption {
-  const title = modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
-
-  return {
-    id: modelId,
-    title,
-    subtitle: "Loaded from local opencode"
-  };
-}
-
-function getOpenAIBearerToken(): string | null {
-  const oauthToken = getOauthAccessToken("openai");
-
-  if (oauthToken) {
-    return oauthToken;
-  }
-
-  const config = loadSessionConfig(getDefaultSessionConfigPath());
-
-  if (config.connection?.provider === "openai" && config.connection.apiKey) {
-    return config.connection.apiKey.trim() || null;
-  }
-
-  return null;
-}
+import {
+  getProviderApiKey,
+  getProviderModelsUrl
+} from "./provider-api.js";
+import { hasOpenAIOauthRuntimeContext } from "./openai-oauth-runtime.js";
 
 function isRelevantOpenAIModel(modelId: string): boolean {
   const lower = modelId.toLowerCase();
@@ -63,17 +40,30 @@ function compareModelIds(left: string, right: string): number {
   return right.localeCompare(left);
 }
 
-function fetchOpenAIModelsSync(): readonly ModelOption[] | null {
-  const token = getOpenAIBearerToken();
+function fetchModelsFromApiSync(
+  providerId: string,
+  filterFn?: (modelId: string) => boolean
+): readonly ModelOption[] | null {
+  const apiKey = getProviderApiKey(providerId);
 
-  if (!token) {
+  if (!apiKey) {
+    return null;
+  }
+
+  if (providerId === "openai" && hasOpenAIOauthRuntimeContext(apiKey)) {
+    return getFallbackModels(providerId);
+  }
+
+  const modelsUrl = getProviderModelsUrl(providerId);
+
+  if (!modelsUrl) {
     return null;
   }
 
   try {
     const result = spawnSync(
       "curl",
-      ["-sS", "-H", `Authorization: Bearer ${token}`, "https://api.openai.com/v1/models"],
+      ["-sS", "-H", `Authorization: Bearer ${apiKey}`, modelsUrl],
       { encoding: "utf8", timeout: 10_000 }
     );
 
@@ -87,14 +77,20 @@ function fetchOpenAIModelsSync(): readonly ModelOption[] | null {
       return null;
     }
 
-    const models = response.data
+    let modelIds = response.data
       .map((entry) => (typeof entry?.id === "string" ? entry.id : ""))
-      .filter((id) => id && isRelevantOpenAIModel(id))
+      .filter((id) => id.length > 0);
+
+    if (filterFn) {
+      modelIds = modelIds.filter(filterFn);
+    }
+
+    const models = modelIds
       .sort(compareModelIds)
       .map((id) => ({
-        id: `openai/${id}`,
+        id: `${providerId}/${id}`,
         title: id,
-        subtitle: "From OpenAI API"
+        subtitle: `From ${providerId} API`
       }));
 
     return models.length > 0 ? models : null;
@@ -103,13 +99,35 @@ function fetchOpenAIModelsSync(): readonly ModelOption[] | null {
   }
 }
 
-export function fetchModelIdsAsync(
+function fetchModelsFromApiAsync(
   providerId: string,
-  callback: (modelIds: readonly string[]) => void
+  callback: (modelIds: readonly string[]) => void,
+  filterFn?: (modelId: string) => boolean
 ): void {
-  const proc = spawn("opencode", ["models", providerId], {
-    stdio: ["ignore", "pipe", "ignore"]
-  });
+  const apiKey = getProviderApiKey(providerId);
+
+  if (!apiKey) {
+    callback(getFallbackModels(providerId).map((m) => m.id));
+    return;
+  }
+
+  if (providerId === "openai" && hasOpenAIOauthRuntimeContext(apiKey)) {
+    callback(getFallbackModels(providerId).map((m) => m.id));
+    return;
+  }
+
+  const modelsUrl = getProviderModelsUrl(providerId);
+
+  if (!modelsUrl) {
+    callback(getFallbackModels(providerId).map((m) => m.id));
+    return;
+  }
+
+  const proc = spawn(
+    "curl",
+    ["-sS", "-H", `Authorization: Bearer ${apiKey}`, modelsUrl],
+    { stdio: ["ignore", "pipe", "ignore"] }
+  );
 
   let output = "";
   const timeout = setTimeout(() => {
@@ -122,16 +140,33 @@ export function fetchModelIdsAsync(
 
   proc.on("close", () => {
     clearTimeout(timeout);
-    const models = output
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((id) => (id.includes("/") ? id : `${providerId}/${id}`));
 
-    if (models.length > 0) {
-      callback(models);
+    try {
+      const response = JSON.parse(output) as { data?: Array<{ id?: string }> };
 
-      return;
+      if (!response?.data || !Array.isArray(response.data)) {
+        callback(getFallbackModels(providerId).map((m) => m.id));
+        return;
+      }
+
+      let modelIds = response.data
+        .map((entry) => (typeof entry?.id === "string" ? entry.id : ""))
+        .filter((id) => id.length > 0);
+
+      if (filterFn) {
+        modelIds = modelIds.filter(filterFn);
+      }
+
+      const models = modelIds
+        .sort(compareModelIds)
+        .map((id) => (id.includes("/") ? id : `${providerId}/${id}`));
+
+      if (models.length > 0) {
+        callback(models);
+        return;
+      }
+    } catch {
+      // Fall through to fallback.
     }
 
     callback(getFallbackModels(providerId).map((m) => m.id));
@@ -143,31 +178,20 @@ export function fetchModelIdsAsync(
   });
 }
 
+export function fetchModelIdsAsync(
+  providerId: string,
+  callback: (modelIds: readonly string[]) => void
+): void {
+  const filterFn = providerId === "openai" ? isRelevantOpenAIModel : undefined;
+  fetchModelsFromApiAsync(providerId, callback, filterFn);
+}
+
 export function getModelOptionsForProvider(providerId: string): readonly ModelOption[] {
-  try {
-    const output = execFileSync("opencode", ["models", providerId], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
-    });
-    const models = output
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((modelId) => createModelOption(modelId));
+  const filterFn = providerId === "openai" ? isRelevantOpenAIModel : undefined;
+  const apiModels = fetchModelsFromApiSync(providerId, filterFn);
 
-    if (models.length > 0) {
-      return models;
-    }
-  } catch {
-    // Fall back to direct API fetch or built-in catalog if opencode is unavailable.
-  }
-
-  if (providerId === "openai") {
-    const apiModels = fetchOpenAIModelsSync();
-
-    if (apiModels) {
-      return apiModels;
-    }
+  if (apiModels) {
+    return apiModels;
   }
 
   return getFallbackModels(providerId);

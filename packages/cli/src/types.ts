@@ -134,7 +134,7 @@ export interface AppState {
   transcript: readonly TranscriptEntry[];
   transcriptScrollOffset: number;
   pendingTask: PendingTask | null;
-  opencodeSessionId: string | null;
+  chatSessionId: string | null;
 }
 
 export interface InputSubmissionResult {
