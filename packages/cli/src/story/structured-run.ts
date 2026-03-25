@@ -5,6 +5,8 @@ import {
   getModelProvider,
   stripProviderPrefix
 } from "../utils/provider-api.js";
+import { streamOpenAICodexResponse } from "../utils/openai-codex-responses.js";
+import { resolveOpenAIOauthRuntimeContext } from "../utils/openai-oauth-runtime.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -177,13 +179,14 @@ async function runDirectStructuredPrompt(
     );
   }
 
-  const completionUrl = getProviderCompletionUrl(providerId);
+  const modelId = stripProviderPrefix(model);
+  const openAIOauthRuntime =
+    providerId === "openai" ? resolveOpenAIOauthRuntimeContext(apiKey) : null;
+  const completionUrl = openAIOauthRuntime ? null : getProviderCompletionUrl(providerId);
 
-  if (!completionUrl) {
+  if (!openAIOauthRuntime && !completionUrl) {
     throw new Error(`No API endpoint configured for provider "${providerId}".`);
   }
-
-  const modelId = stripProviderPrefix(model);
   const extraHeaders = buildExtraHeaders(providerId);
 
   const historyMessages = (history ?? []).map((msg) => ({
@@ -218,6 +221,27 @@ async function runDirectStructuredPrompt(
     signal?.addEventListener("abort", onCallerAbort, { once: true });
 
     try {
+      if (openAIOauthRuntime) {
+        const content = await streamOpenAICodexResponse({
+          accessToken: openAIOauthRuntime.accessToken,
+          accountId: openAIOauthRuntime.accountId,
+          model: modelId,
+          prompt,
+          history,
+          signal: timeoutController.signal
+        });
+
+        if (!content.trim()) {
+          throw new Error(`${providerId} response did not contain text output.`);
+        }
+
+        return normalizeAssistantText(content);
+      }
+
+      if (!completionUrl) {
+        throw new Error(`No API endpoint configured for provider "${providerId}".`);
+      }
+
       const response = await fetch(completionUrl, {
         method: "POST",
         headers: {

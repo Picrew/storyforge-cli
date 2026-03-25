@@ -4,6 +4,7 @@ import {
   getProviderApiKey,
   getProviderModelsUrl
 } from "./provider-api.js";
+import { hasOpenAIOauthRuntimeContext } from "./openai-oauth-runtime.js";
 
 function isRelevantOpenAIModel(modelId: string): boolean {
   const lower = modelId.toLowerCase();
@@ -47,6 +48,10 @@ function fetchModelsFromApiSync(
 
   if (!apiKey) {
     return null;
+  }
+
+  if (providerId === "openai" && hasOpenAIOauthRuntimeContext(apiKey)) {
+    return getFallbackModels(providerId);
   }
 
   const modelsUrl = getProviderModelsUrl(providerId);
@@ -102,6 +107,11 @@ function fetchModelsFromApiAsync(
   const apiKey = getProviderApiKey(providerId);
 
   if (!apiKey) {
+    callback(getFallbackModels(providerId).map((m) => m.id));
+    return;
+  }
+
+  if (providerId === "openai" && hasOpenAIOauthRuntimeContext(apiKey)) {
     callback(getFallbackModels(providerId).map((m) => m.id));
     return;
   }

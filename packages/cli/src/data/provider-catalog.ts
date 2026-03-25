@@ -20,13 +20,15 @@ const providerCatalog: readonly ProviderOption[] = [
   {
     id: "openai",
     title: "OpenAI",
-    subtitle: "API key",
+    subtitle: "Browser or API key",
     group: "popular",
-    authKind: "api",
+    authKind: "choice",
     authLabel: "Saved in .storyforge",
     credentialLabel: "API key",
     credentialHelperText: "Enter saves to .storyforge and opens model picker.",
     fallbackModels: [
+      { id: "openai/gpt-5.4-mini", title: "gpt-5.4-mini", subtitle: "ChatGPT Plus/Pro default" },
+      { id: "openai/gpt-5.3-codex", title: "gpt-5.3-codex", subtitle: "Advanced coding model" },
       { id: "openai/gpt-5.2-codex", title: "gpt-5.2-codex", subtitle: "Latest code-first GPT" },
       { id: "openai/gpt-5-codex", title: "gpt-5-codex", subtitle: "Stable code-first GPT" },
       { id: "openai/gpt-5.2", title: "gpt-5.2", subtitle: "General-purpose GPT-5" },
@@ -36,12 +38,12 @@ const providerCatalog: readonly ProviderOption[] = [
   {
     id: "github-copilot",
     title: "GitHub Copilot",
-    subtitle: "API key",
+    subtitle: "Browser auth",
     group: "popular",
-    authKind: "api",
-    authLabel: "Saved in .storyforge",
+    authKind: "oauth",
+    authLabel: "GitHub browser auth",
     credentialLabel: "API key",
-    credentialHelperText: "Enter saves to .storyforge and opens model picker.",
+    credentialHelperText: "Storyforge starts GitHub browser verification and saves the token to .storyforge.",
     fallbackModels: [
       { id: "github-copilot/gpt-4.1", title: "gpt-4.1", subtitle: "Copilot default" },
       {

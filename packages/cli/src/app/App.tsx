@@ -101,6 +101,7 @@ import {
   syncOauthCredentialRecord
 } from "../utils/opencode-auth.js";
 import { startOpenAIOauthSession } from "../utils/openai-oauth.js";
+import { startGitHubCopilotOauthSession } from "../utils/github-copilot-oauth.js";
 import { fetchModelIdsAsync, getModelOptionsForProvider } from "../utils/opencode-models.js";
 import {
   normalizeAssistantText,
@@ -175,6 +176,10 @@ export function App({
   initialConfigOverride,
   structuredRunnerOverride
 }: AppProps = {}): React.JSX.Element {
+  interface ManagedOauthSession {
+    cancel: () => void;
+  }
+
   const { exit } = useApp();
   const { stdout } = useStdout();
   const terminalWidth = terminalWidthOverride ?? stdout?.columns ?? 80;
@@ -216,7 +221,7 @@ export function App({
   const stateRef = useRef(state);
   const streamProcessRef = useRef<DirectStreamHandle | null>(null);
   const streamRunIdRef = useRef(0);
-  const oauthSessionRef = useRef<Awaited<ReturnType<typeof startOpenAIOauthSession>> | null>(null);
+  const oauthSessionRef = useRef<ManagedOauthSession | null>(null);
   const oauthRunIdRef = useRef(0);
   const storyTaskRunIdRef = useRef(0);
   const modelCacheRef = useRef<Map<string, readonly string[]>>(new Map());
@@ -676,6 +681,161 @@ export function App({
         setConnectOauthFlowState(activeState, {
           flowPhase: "failed",
           statusMessage: "Press Enter to retry, or Tab to switch to the other OpenAI flow.",
+          errorMessage: message
+        })
+      );
+    }
+  };
+
+  const beginNativeGitHubCopilotOauthFlow = async (currentState: AppState): Promise<void> => {
+    if (
+      !currentState.modal ||
+      currentState.modal.kind !== "connect-oauth" ||
+      currentState.modal.providerId !== "github-copilot"
+    ) {
+      return;
+    }
+
+    stopOauthSession();
+    const runId = oauthRunIdRef.current;
+    commitState(
+      setConnectOauthFlowState(currentState, {
+        flowPhase: "launching",
+        authUrl: null,
+        userCode: null,
+        statusMessage: "Requesting a device code from GitHub...",
+        errorMessage: null
+      })
+    );
+
+    try {
+      const session = await startGitHubCopilotOauthSession("browser");
+
+      if (oauthRunIdRef.current !== runId) {
+        session.cancel();
+        return;
+      }
+
+      oauthSessionRef.current = session;
+      const waitingState = stateRef.current;
+
+      if (
+        waitingState.modal &&
+        waitingState.modal.kind === "connect-oauth" &&
+        waitingState.modal.providerId === "github-copilot"
+      ) {
+        commitState(
+          setConnectOauthFlowState(waitingState, {
+            flowPhase: "waiting",
+            authUrl: session.authUrl,
+            userCode: session.userCode,
+            statusMessage: session.browserOpened
+              ? "Browser opened. Finish the GitHub verification page to continue."
+              : "Open the URL below manually, then complete the GitHub verification page.",
+            errorMessage: null
+          })
+        );
+      }
+
+      const credential = await session.waitForCompletion();
+
+      if (oauthRunIdRef.current !== runId) {
+        return;
+      }
+
+      oauthSessionRef.current = null;
+      const activeState = stateRef.current;
+
+      if (
+        !activeState.modal ||
+        activeState.modal.kind !== "connect-oauth" ||
+        activeState.modal.providerId !== "github-copilot"
+      ) {
+        return;
+      }
+
+      const now = Date.now();
+      const authSyncError = syncOauthCredentialRecord("github-copilot", {
+        access: credential.accessToken,
+        refresh: credential.refreshToken,
+        expires: credential.expiresAt,
+        accountId: null
+      });
+      const connectedState = connectWithSession(
+        closeModal(activeState),
+        {
+          provider: "github-copilot",
+          authMode: "oauth",
+          apiKey: credential.accessToken,
+          baseUrl: null,
+          authLabel: "GitHub browser auth"
+        },
+        now
+      );
+      const nextState = openModelPickerForProvider(
+        authSyncError
+          ? setTransientNotice(
+              connectedState,
+              `Connected GitHub Copilot, but the oauth cache failed to save: ${authSyncError}`,
+              now
+            )
+          : connectedState,
+        now
+      );
+
+      commitState(nextState);
+    } catch (error) {
+      if (oauthRunIdRef.current !== runId) {
+        return;
+      }
+
+      oauthSessionRef.current = null;
+      const activeState = stateRef.current;
+
+      if (
+        !activeState.modal ||
+        activeState.modal.kind !== "connect-oauth" ||
+        activeState.modal.providerId !== "github-copilot"
+      ) {
+        return;
+      }
+
+      const reusableCredential = getOauthCredential("github-copilot", getSystemOpencodeAuthPath());
+
+      if (reusableCredential) {
+        const now = Date.now();
+        const cacheSyncError = syncOauthCredentialRecord("github-copilot", reusableCredential);
+        const connectedState = connectWithSession(
+          closeModal(activeState),
+          {
+            provider: "github-copilot",
+            authMode: "oauth",
+            apiKey: reusableCredential.access,
+            baseUrl: null,
+            authLabel: "GitHub browser auth"
+          },
+          now
+        );
+        const nextState = openModelPickerForProvider(
+          setTransientNotice(
+            connectedState,
+            cacheSyncError
+              ? `GitHub browser auth failed, and the fallback credential imported but could not refresh the local oauth cache: ${cacheSyncError}`
+              : "GitHub browser auth failed, so Storyforge imported the existing local credential instead.",
+            now
+          ),
+          now
+        );
+
+        commitState(nextState);
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      commitState(
+        setConnectOauthFlowState(activeState, {
+          flowPhase: "failed",
+          statusMessage: "Press Enter to retry GitHub browser auth.",
           errorMessage: message
         })
       );
@@ -2388,8 +2548,12 @@ export function App({
       return setTransientNotice(closeModal(currentState), "Unknown provider.", now);
     }
 
-    if (currentState.modal.selectedIndex <= 0) {
-      return openConnectOauthModal(currentState, providerOption.id);
+    if (currentState.modal.selectedIndex === 0) {
+      return openConnectOauthModal(currentState, providerOption.id, "browser");
+    }
+
+    if (currentState.modal.selectedIndex === 1) {
+      return openConnectOauthModal(currentState, providerOption.id, "headless");
     }
 
     return openConnectCredentialsModal(
@@ -2727,12 +2891,12 @@ export function App({
 
       if (currentState.modal.kind === "connect-auth-mode") {
         if (key.upArrow) {
-          commitState(moveConnectAuthModeSelection(currentState, 2, -1));
+          commitState(moveConnectAuthModeSelection(currentState, 3, -1));
           return;
         }
 
         if (key.downArrow) {
-          commitState(moveConnectAuthModeSelection(currentState, 2, 1));
+          commitState(moveConnectAuthModeSelection(currentState, 3, 1));
           return;
         }
 
@@ -2760,13 +2924,14 @@ export function App({
         }
 
         if (key.return) {
+          const hasSavedOauthCredentialForProvider =
+            currentState.config.connection?.provider === currentState.modal.providerId &&
+            currentState.config.connection.authMode === "oauth" &&
+            Boolean(currentState.config.connection.apiKey);
+
           if (
             currentState.modal.providerId === "openai" &&
-            !(
-              currentState.config.connection?.provider === "openai" &&
-              currentState.config.connection.authMode === "oauth" &&
-              currentState.config.connection.apiKey
-            )
+            !hasSavedOauthCredentialForProvider
           ) {
             if (
               currentState.modal.flowPhase === "launching" ||
@@ -2776,6 +2941,21 @@ export function App({
             }
 
             void beginNativeOpenAIOauthFlow(currentState);
+            return;
+          }
+
+          if (
+            currentState.modal.providerId === "github-copilot" &&
+            !hasSavedOauthCredentialForProvider
+          ) {
+            if (
+              currentState.modal.flowPhase === "launching" ||
+              currentState.modal.flowPhase === "waiting"
+            ) {
+              return;
+            }
+
+            void beginNativeGitHubCopilotOauthFlow(currentState);
             return;
           }
 
