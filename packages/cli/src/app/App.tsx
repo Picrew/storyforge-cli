@@ -140,12 +140,16 @@ function getFilteredModelIds(state: AppState): readonly string[] {
   }
 
   const normalizedSearch = state.modal.searchValue.trim().toLowerCase();
+  const sourceModelIds =
+    normalizedSearch.length > 0
+      ? (state.modal.allModelIds ?? state.modal.modelIds)
+      : state.modal.modelIds;
 
   if (!normalizedSearch) {
-    return state.modal.modelIds;
+    return sourceModelIds;
   }
 
-  const matched = state.modal.modelIds.filter((modelId) => modelId.toLowerCase().includes(normalizedSearch));
+  const matched = sourceModelIds.filter((modelId) => modelId.toLowerCase().includes(normalizedSearch));
 
   if (matched.length === 0 && looksLikeModelId(normalizedSearch)) {
     return [normalizedSearch];
@@ -909,17 +913,30 @@ export function App({
       return currentState;
     }
 
+    if (!currentState.modal.groupedEntries) {
+      return currentState;
+    }
+
     const recentModels = currentState.config.recentModels ?? [];
     const currentProviderId = currentState.config.connection?.provider;
-    const allModelIds: string[] = [];
-    const entries: ModelListEntry[] = [];
-    const usedModelIds = new Set<string>();
+
+    if (!currentProviderId) {
+      return currentState;
+    }
+
+    if (recentModels.length === 0) {
+      return currentState;
+    }
+
+    const visibleModelIds: string[] = [];
+    const visibleEntries: ModelListEntry[] = [];
+    const visibleUsedModelIds = new Set<string>();
 
     const grouped = new Map<string, string[]>();
 
     for (const modelId of recentModels) {
       const sep = modelId.indexOf("/");
-      const provider = sep > 0 ? modelId.slice(0, sep) : currentProviderId ?? "";
+      const provider = sep > 0 ? modelId.slice(0, sep) : currentProviderId;
 
       if (!grouped.has(provider)) {
         grouped.set(provider, []);
@@ -928,11 +945,42 @@ export function App({
       grouped.get(provider)!.push(modelId);
     }
 
+    const appendVisibleGroup = (providerId: string, modelIds: readonly string[]): void => {
+      if (modelIds.length === 0) {
+        return;
+      }
+
+      const providerOption = getProviderOption(providerId);
+      visibleEntries.push({ kind: "header", label: providerOption?.title ?? providerId });
+
+      for (const modelId of modelIds) {
+        if (visibleUsedModelIds.has(modelId)) {
+          continue;
+        }
+
+        visibleEntries.push({ kind: "item", modelId });
+        visibleModelIds.push(modelId);
+        visibleUsedModelIds.add(modelId);
+      }
+    };
+
+    appendVisibleGroup(currentProviderId, grouped.get(currentProviderId) ?? []);
+
+    for (const [providerId, models] of grouped) {
+      if (providerId === currentProviderId) {
+        continue;
+      }
+
+      appendVisibleGroup(providerId, models);
+    }
+
+    if (visibleModelIds.length === 0) {
+      return currentState;
+    }
+
     const providerOrder: string[] = [];
 
-    if (currentProviderId) {
-      providerOrder.push(currentProviderId);
-    }
+    providerOrder.push(currentProviderId);
 
     for (const pid of grouped.keys()) {
       if (!providerOrder.includes(pid)) {
@@ -945,6 +993,10 @@ export function App({
         providerOrder.push(pid);
       }
     }
+
+    const allModelIds: string[] = [];
+    const allEntries: ModelListEntry[] = [];
+    const allUsedModelIds = new Set<string>();
 
     for (const providerId of providerOrder) {
       const historyModels = grouped.get(providerId) ?? [];
@@ -964,42 +1016,39 @@ export function App({
         continue;
       }
 
-      entries.push({ kind: "header", label });
+      allEntries.push({ kind: "header", label });
 
       for (const modelId of providerModels) {
-        if (usedModelIds.has(modelId)) {
+        if (allUsedModelIds.has(modelId)) {
           continue;
         }
 
-        entries.push({ kind: "item", modelId });
+        allEntries.push({ kind: "item", modelId });
         allModelIds.push(modelId);
-        usedModelIds.add(modelId);
+        allUsedModelIds.add(modelId);
       }
     }
 
-    if (allModelIds.length === 0) {
-      return currentState;
-    }
-
-    const prevSelectedModel = currentState.modal.modelIds[currentState.modal.selectedIndex];
-    let selectedIndex = 0;
-
-    if (prevSelectedModel) {
-      const idx = allModelIds.indexOf(prevSelectedModel);
-
-      if (idx >= 0) {
-        selectedIndex = idx;
-      }
-    }
+    const effectiveAllModelIds = allModelIds.length > 0 ? allModelIds : visibleModelIds;
+    const effectiveAllEntries = allEntries.length > 0 ? allEntries : visibleEntries;
 
     return {
       ...currentState,
       modal: {
         ...currentState.modal,
-        modelIds: allModelIds,
-        groupedEntries: entries,
-        allModelIds,
-        selectedIndex
+        modelIds: visibleModelIds,
+        groupedEntries: visibleEntries,
+        allModelIds: effectiveAllModelIds,
+        allGroupedEntries: effectiveAllEntries,
+        selectedIndex: Math.min(
+          currentState.modal.selectedIndex,
+          Math.max(
+            0,
+            (currentState.modal.searchValue.trim()
+              ? effectiveAllModelIds.length
+              : visibleModelIds.length) - 1
+          )
+        )
       }
     };
   };
@@ -1035,8 +1084,8 @@ export function App({
       return openModelPickerForProvider(currentState, now);
     }
 
-    const allModelIds = [...recentModels];
-    const entries: ModelListEntry[] = [];
+    const visibleModelIds = [...recentModels];
+    const visibleEntries: ModelListEntry[] = [];
 
     const grouped = new Map<string, string[]>();
 
@@ -1051,41 +1100,102 @@ export function App({
       grouped.get(provider)!.push(modelId);
     }
 
-    const currentGroup = grouped.get(currentProviderId);
-
-    if (currentGroup) {
-      const providerOption = getProviderOption(currentProviderId);
-      entries.push({ kind: "header", label: providerOption?.title ?? currentProviderId });
-
-      for (const modelId of currentGroup) {
-        entries.push({ kind: "item", modelId });
+    const appendVisibleGroup = (providerId: string, modelIds: readonly string[]): void => {
+      if (modelIds.length === 0) {
+        return;
       }
-    }
+
+      const providerOption = getProviderOption(providerId);
+      visibleEntries.push({ kind: "header", label: providerOption?.title ?? providerId });
+
+      for (const modelId of modelIds) {
+        visibleEntries.push({ kind: "item", modelId });
+      }
+    };
+
+    appendVisibleGroup(currentProviderId, grouped.get(currentProviderId) ?? []);
 
     for (const [providerId, models] of grouped) {
       if (providerId === currentProviderId) {
         continue;
       }
 
-      const providerOption = getProviderOption(providerId);
-      entries.push({ kind: "header", label: providerOption?.title ?? providerId });
+      appendVisibleGroup(providerId, models);
+    }
 
-      for (const modelId of models) {
-        entries.push({ kind: "item", modelId });
+    if (visibleModelIds.length === 0) {
+      return setTransientNotice(currentState, `No models found for ${currentProviderId}.`, now);
+    }
+
+    const providerOrder: string[] = [currentProviderId];
+
+    for (const providerId of grouped.keys()) {
+      if (!providerOrder.includes(providerId)) {
+        providerOrder.push(providerId);
       }
     }
+
+    for (const providerId of modelCacheRef.current.keys()) {
+      if (!providerOrder.includes(providerId)) {
+        providerOrder.push(providerId);
+      }
+    }
+
+    const allModelIds: string[] = [];
+    const allEntries: ModelListEntry[] = [];
+    const usedAllModelIds = new Set<string>();
+
+    for (const providerId of providerOrder) {
+      const historyModels = grouped.get(providerId) ?? [];
+      const cachedModels = modelCacheRef.current.get(providerId) ?? [];
+      const providerModels = [...historyModels];
+
+      for (const modelId of cachedModels) {
+        if (!providerModels.includes(modelId)) {
+          providerModels.push(modelId);
+        }
+      }
+
+      if (providerModels.length === 0) {
+        continue;
+      }
+
+      const providerOption = getProviderOption(providerId);
+      allEntries.push({ kind: "header", label: providerOption?.title ?? providerId });
+
+      for (const modelId of providerModels) {
+        if (usedAllModelIds.has(modelId)) {
+          continue;
+        }
+
+        allEntries.push({ kind: "item", modelId });
+        allModelIds.push(modelId);
+        usedAllModelIds.add(modelId);
+      }
+    }
+
+    const effectiveAllModelIds = allModelIds.length > 0 ? allModelIds : visibleModelIds;
+    const effectiveAllEntries = allEntries.length > 0 ? allEntries : visibleEntries;
 
     let selectedIndex = 0;
 
     if (currentState.config.model) {
-      const idx = allModelIds.indexOf(currentState.config.model);
+      const idx = visibleModelIds.indexOf(currentState.config.model);
 
       if (idx >= 0) {
         selectedIndex = idx;
       }
     }
 
-    return openModelPickerModal(currentState, currentProviderId, allModelIds, selectedIndex, entries, allModelIds);
+    return openModelPickerModal(
+      currentState,
+      currentProviderId,
+      visibleModelIds,
+      selectedIndex,
+      visibleEntries,
+      effectiveAllModelIds,
+      effectiveAllEntries
+    );
   };
 
   const getStoryStageLabel = (stage: StoryBootstrapStage): string => {
@@ -2791,13 +2901,25 @@ export function App({
       return;
     }
 
+    const providerIds = new Set<string>();
     const history = stateRef.current.config.connectionHistory;
+    const activeProviderId = stateRef.current.config.connection?.provider;
 
-    if (!history) {
+    if (history) {
+      for (const providerId of Object.keys(history)) {
+        providerIds.add(providerId);
+      }
+    }
+
+    if (activeProviderId) {
+      providerIds.add(activeProviderId);
+    }
+
+    if (providerIds.size === 0) {
       return;
     }
 
-    for (const providerId of Object.keys(history)) {
+    for (const providerId of providerIds) {
       if (modelCacheRef.current.has(providerId) || modelFetchingRef.current.has(providerId)) {
         continue;
       }
