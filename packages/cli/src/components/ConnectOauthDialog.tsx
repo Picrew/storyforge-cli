@@ -126,7 +126,7 @@ export function ConnectOauthDialog({
         ) : null}
         {!hasSavedCredential && canImportCredential ? (
           <Text color={themeTokens.textSecondary}>
-            A reusable local opencode credential is also available as a fallback.
+            A reusable local credential is also available as a fallback.
           </Text>
         ) : null}
         {statusMessage ? (

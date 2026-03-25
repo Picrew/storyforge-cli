@@ -109,7 +109,7 @@ export function createInitialAppState(
     transcript: [],
     transcriptScrollOffset: 0,
     pendingTask: null,
-    opencodeSessionId: null
+    chatSessionId: null
   };
 }
 
