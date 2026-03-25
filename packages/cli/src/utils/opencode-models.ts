@@ -9,22 +9,28 @@ import { hasOpenAIOauthRuntimeContext } from "./openai-oauth-runtime.js";
 function isRelevantOpenAIModel(modelId: string): boolean {
   const lower = modelId.toLowerCase();
 
-  if (lower.includes(":")) {
-    return false;
-  }
-
-  if (/\d{4}-\d{2}-\d{2}/.test(lower)) {
+  // Hide clearly non-chat models in the picker, but keep dated/codex variants.
+  if (
+    lower.includes("embedding") ||
+    lower.includes("moderation") ||
+    lower.includes("whisper") ||
+    lower.includes("transcribe") ||
+    lower.includes("transcription") ||
+    lower.includes("speech") ||
+    lower.includes("tts") ||
+    lower.includes("audio")
+  ) {
     return false;
   }
 
   return (
-    lower.startsWith("gpt-5") ||
-    lower.startsWith("gpt-4o") ||
-    lower.startsWith("gpt-4.") ||
+    lower.startsWith("gpt-") ||
+    lower.startsWith("chatgpt-") ||
+    lower.startsWith("codex") ||
+    lower.includes("codex") ||
     lower.startsWith("o1") ||
     lower.startsWith("o3") ||
-    lower.startsWith("o4") ||
-    lower.startsWith("chatgpt-")
+    lower.startsWith("o4")
   );
 }
 
