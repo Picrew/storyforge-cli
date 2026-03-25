@@ -64,6 +64,21 @@ function pushPreformattedLines(
   });
 }
 
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1_000);
+
+  if (totalSeconds < 60) {
+    const tenths = Math.floor((ms % 1_000) / 100);
+
+    return `${totalSeconds}.${tenths}s`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}m ${seconds}s`;
+}
+
 function buildTranscriptLines(
   turns: readonly TranscriptEntry[],
   width: number,
@@ -139,22 +154,27 @@ function buildTranscriptLines(
     }
 
     const isLastTurn = index === lastIndex;
+    const elapsed = turn.startedAt ? Date.now() - turn.startedAt : 0;
+    const elapsedLabel = turn.startedAt && elapsed >= 100 ? ` ${formatElapsed(elapsed)}` : "";
     let statusSuffix = "";
     let statusColor = "";
     if (isLastTurn) {
       if (turn.streaming) {
-        statusSuffix = ` ${spinnerFrame} streaming`;
+        statusSuffix = ` ${spinnerFrame}${elapsedLabel}`;
         statusColor = themeTokens.accent;
       } else if (pendingTask) {
-        statusSuffix = ` ${spinnerFrame} running`;
+        statusSuffix = ` ${spinnerFrame}${elapsedLabel}`;
         statusColor = themeTokens.accent;
       } else if (turn.failed) {
-        statusSuffix = " ✗ failed";
+        statusSuffix = ` ✗${elapsedLabel}`;
         statusColor = themeTokens.notice;
       } else {
-        statusSuffix = " ✓ done";
+        statusSuffix = ` ✓${elapsedLabel}`;
         statusColor = themeTokens.success;
       }
+    } else if (elapsedLabel) {
+      statusSuffix = ` ✓${elapsedLabel}`;
+      statusColor = themeTokens.textSecondary;
     }
 
     lines.push({
