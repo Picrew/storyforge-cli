@@ -1523,7 +1523,8 @@ export function App({
         model: currentModel,
         failed: false,
         rawResponse: "",
-        streaming: true
+        streaming: true,
+        startedAt: Date.now()
       };
       const initialState = appendTranscriptEntry(
         {
@@ -1610,7 +1611,8 @@ export function App({
       model: currentModel,
       failed: false,
       rawResponse: "",
-      streaming: true
+      streaming: true,
+      startedAt: Date.now()
     };
     const initialState = appendTranscriptEntry(
       {

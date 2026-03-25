@@ -111,6 +111,7 @@ export interface LatestExchange {
   failed: boolean;
   rawResponse?: string;
   streaming?: boolean;
+  startedAt?: number;
 }
 
 export interface TranscriptEntry extends LatestExchange {
