@@ -3,6 +3,20 @@ import { Box, Text } from "ink";
 import { themeTokens } from "../theme/tokens.js";
 import type { SessionConfig } from "../types.js";
 
+function stripProviderFromModel(model: string, provider: string | null): string {
+  if (!provider) {
+    return model;
+  }
+
+  const prefix = `${provider}/`;
+
+  if (model.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return model.slice(prefix.length);
+  }
+
+  return model;
+}
+
 interface SessionStatusProps {
   width: number;
   config: SessionConfig;
@@ -66,7 +80,9 @@ export function SessionStatus({ width, config }: SessionStatusProps): React.JSX.
     },
     {
       label: "model",
-      value: config.model ?? "run /models",
+      value: config.model
+        ? stripProviderFromModel(config.model, config.connection?.provider ?? null)
+        : "run /models",
       highlighted: !config.model
     },
     {

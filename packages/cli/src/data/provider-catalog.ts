@@ -18,29 +18,17 @@ export interface ProviderOption {
 
 const providerCatalog: readonly ProviderOption[] = [
   {
-    id: "opencode",
-    title: "OpenCode Zen",
-    subtitle: "Recommended",
-    group: "popular",
-    authKind: "oauth",
-    authLabel: "OpenCode Zen OAuth",
-    credentialLabel: "OAuth",
-    credentialHelperText: "Press Enter to launch opencode auth login.",
-    fallbackModels: [
-      { id: "opencode/zen", title: "zen", subtitle: "Default OpenCode model" },
-      { id: "opencode/zen-mini", title: "zen-mini", subtitle: "Faster OpenCode model" }
-    ]
-  },
-  {
     id: "openai",
     title: "OpenAI",
-    subtitle: "ChatGPT Plus/Pro or API key",
+    subtitle: "Browser or API key",
     group: "popular",
     authKind: "choice",
-    authLabel: "ChatGPT Plus/Pro",
-    credentialLabel: "OAuth",
-    credentialHelperText: "Choose ChatGPT Plus/Pro or API key.",
+    authLabel: "Saved in .storyforge",
+    credentialLabel: "API key",
+    credentialHelperText: "Enter saves to .storyforge and opens model picker.",
     fallbackModels: [
+      { id: "openai/gpt-5.4-mini", title: "gpt-5.4-mini", subtitle: "ChatGPT Plus/Pro default" },
+      { id: "openai/gpt-5.3-codex", title: "gpt-5.3-codex", subtitle: "Advanced coding model" },
       { id: "openai/gpt-5.2-codex", title: "gpt-5.2-codex", subtitle: "Latest code-first GPT" },
       { id: "openai/gpt-5-codex", title: "gpt-5-codex", subtitle: "Stable code-first GPT" },
       { id: "openai/gpt-5.2", title: "gpt-5.2", subtitle: "General-purpose GPT-5" },
@@ -50,12 +38,12 @@ const providerCatalog: readonly ProviderOption[] = [
   {
     id: "github-copilot",
     title: "GitHub Copilot",
-    subtitle: "Copilot account",
+    subtitle: "Browser auth",
     group: "popular",
     authKind: "oauth",
-    authLabel: "GitHub Copilot OAuth",
-    credentialLabel: "OAuth",
-    credentialHelperText: "Press Enter to launch the GitHub Copilot sign-in flow.",
+    authLabel: "GitHub browser auth",
+    credentialLabel: "API key",
+    credentialHelperText: "Storyforge starts GitHub browser verification and saves the token to .storyforge.",
     fallbackModels: [
       { id: "github-copilot/gpt-4.1", title: "gpt-4.1", subtitle: "Copilot default" },
       {

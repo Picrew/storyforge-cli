@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -212,22 +211,7 @@ export function getConnectedProviderIds(authPath: string = getDefaultOpencodeAut
   });
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function launchOauthLogin(providerId: string): string | null {
-  const result = spawnSync("opencode", ["auth", "login", providerId], {
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      XDG_DATA_HOME: getStoryforgeOpencodeDataDir()
-    }
-  });
-
-  if (result.error) {
-    return result.error.message;
-  }
-
-  if (result.status !== 0) {
-    return `opencode auth login ${providerId} exited with status ${result.status ?? "unknown"}.`;
-  }
-
-  return null;
+  return "OAuth login via opencode is no longer supported. Please use an API key instead: /connect <provider> <api-key>.";
 }

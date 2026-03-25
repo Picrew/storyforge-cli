@@ -228,7 +228,7 @@ describe("Input frame interactions", () => {
       />
     );
 
-    expect(app.lastFrame()).toContain("openai/gpt-4o");
+    expect(app.lastFrame()).toContain("gpt-4o");
     expect(app.lastFrame()).toContain("PERSISTED");
     app.unmount();
   });
@@ -566,8 +566,9 @@ describe("Input frame interactions", () => {
       />
     );
 
-    expect(app.lastFrame()).toContain("ChatGPT Plus/Pro");
-    expect(app.lastFrame()).toContain("API key");
+    expect(app.lastFrame()).toContain("ChatGPT Pro/Plus (browser)");
+    expect(app.lastFrame()).toContain("ChatGPT Pro/Plus (headless)");
+    expect(app.lastFrame()).toContain("Manually enter API key");
     expect(app.lastFrame()).not.toContain("SESSION NOTES");
     app.unmount();
   });
