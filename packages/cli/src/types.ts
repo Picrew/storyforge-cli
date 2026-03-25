@@ -88,6 +88,7 @@ export interface ModelPickerModal {
   modelIds: readonly string[];
   groupedEntries?: readonly ModelListEntry[];
   allModelIds?: readonly string[];
+  allGroupedEntries?: readonly ModelListEntry[];
 }
 
 export interface ProjectPickerModal {

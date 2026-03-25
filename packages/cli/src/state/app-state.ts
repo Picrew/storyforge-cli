@@ -556,7 +556,8 @@ export function openModelPickerModal(
   modelIds: readonly string[],
   selectedIndex: number = 0,
   groupedEntries?: readonly ModelListEntry[],
-  allModelIds?: readonly string[]
+  allModelIds?: readonly string[],
+  allGroupedEntries?: readonly ModelListEntry[]
 ): AppState {
   return {
     ...state,
@@ -570,7 +571,8 @@ export function openModelPickerModal(
       selectedIndex,
       modelIds,
       groupedEntries,
-      allModelIds
+      allModelIds,
+      allGroupedEntries
     }
   };
 }
