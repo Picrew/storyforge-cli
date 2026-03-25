@@ -160,20 +160,20 @@ function buildTranscriptLines(
     let statusColor = "";
     if (isLastTurn) {
       if (turn.streaming) {
-        statusSuffix = ` ${spinnerFrame}${elapsedLabel}`;
+        statusSuffix = ` ${spinnerFrame} streaming${elapsedLabel}`;
         statusColor = themeTokens.accent;
       } else if (pendingTask) {
-        statusSuffix = ` ${spinnerFrame}${elapsedLabel}`;
+        statusSuffix = ` ${spinnerFrame} running${elapsedLabel}`;
         statusColor = themeTokens.accent;
       } else if (turn.failed) {
-        statusSuffix = ` ✗${elapsedLabel}`;
+        statusSuffix = ` ✗ failed${elapsedLabel}`;
         statusColor = themeTokens.notice;
       } else {
-        statusSuffix = ` ✓${elapsedLabel}`;
+        statusSuffix = ` ✓ done${elapsedLabel}`;
         statusColor = themeTokens.success;
       }
     } else if (elapsedLabel) {
-      statusSuffix = ` ✓${elapsedLabel}`;
+      statusSuffix = ` ✓ done${elapsedLabel}`;
       statusColor = themeTokens.textSecondary;
     }
 
