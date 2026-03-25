@@ -38,6 +38,7 @@ export interface SessionConfig {
   model: string | null;
   connectionHistory?: Record<string, SessionConnection>;
   recentModels?: string[];
+  tavilyApiKey?: string | null;
 }
 
 export interface ProviderPickerModal {
