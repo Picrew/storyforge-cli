@@ -50,7 +50,7 @@ export function applyConnectCommand(
   const nextModel =
     config.model && currentModelProvider !== connection.provider ? null : config.model;
 
-  let nextHistory = { ...(config.connectionHistory ?? {}) };
+  const nextHistory = { ...(config.connectionHistory ?? {}) };
 
   if (config.connection) {
     nextHistory[config.connection.provider] = config.connection;

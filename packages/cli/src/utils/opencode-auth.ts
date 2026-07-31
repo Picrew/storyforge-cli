@@ -75,7 +75,11 @@ function readAuthStore(authPath: string = getDefaultOpencodeAuthPath()): AuthSto
 function writeAuthStore(store: AuthStore, authPath: string = getDefaultOpencodeAuthPath()): string | null {
   try {
     fs.mkdirSync(path.dirname(authPath), { recursive: true });
-    fs.writeFileSync(authPath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+    fs.writeFileSync(authPath, `${JSON.stringify(store, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600
+    });
+    fs.chmodSync(authPath, 0o600);
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);

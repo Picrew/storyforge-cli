@@ -18,6 +18,11 @@ import {
   type ChapterRenderPromptContext,
   buildCommitPatchPrompt
 } from "./prompt-catalog.js";
+import {
+  getStoryArtifactPaths,
+  migrateLegacyStoryArtifacts
+} from "./artifact-store.js";
+import { runChapterValidationRepairGate } from "./story-validation.js";
 import { parseStructuredJson, type StructuredRunner } from "./structured-run.js";
 import type { EventPatchOp, StoryCiReport, StoryProject } from "./types.js";
 
@@ -275,6 +280,14 @@ export async function commitStoryEvent(options: CommitStoryEventOptions): Promis
     throw new Error("Invalid chapter id.");
   }
 
+  const chapterNumber = parseChapterNumber(normalizedChapterId);
+  const knownChapter = chapterNumber !== null &&
+    options.project.outline.some((entry) => entry.number === chapterNumber);
+
+  if (!knownChapter) {
+    throw new Error(`Unknown chapter id: ${normalizedChapterId}. Add it to the outline first.`);
+  }
+
   const baseProject = cloneProject(options.project);
   let patchPayload = options.patchFilePath
     ? resolvePatchPayloadFromFile(options.patchFilePath)
@@ -399,12 +412,9 @@ export async function runStoryCi(options: RunStoryCiOptions): Promise<{
   };
 }
 
-function getChaptersDirectory(cwd: string): string {
-  return path.join(cwd, ".storyforge", "chapters");
-}
-
 export interface RenderStoryChaptersOptions {
   cwd: string;
+  projectId?: string | null;
   model: string;
   project: StoryProject;
   chapterIds: readonly string[];
@@ -412,6 +422,8 @@ export interface RenderStoryChaptersOptions {
   force: boolean;
   runner: StructuredRunner;
   maxConcurrency?: number;
+  validateOutput?: boolean;
+  maxRepairAttempts?: number;
   abortSignal?: AbortSignal;
 }
 
@@ -419,6 +431,10 @@ export interface RenderStoryChaptersResult {
   project: StoryProject;
   rendered: string[];
   skipped: string[];
+  errors: {
+    chapterId: string;
+    message: string;
+  }[];
 }
 
 function normalizeConcurrency(value: number | undefined): number {
@@ -612,7 +628,11 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
   const project = cloneProject(options.project);
   const rendered: string[] = [];
   const skipped: string[] = [];
-  const chaptersDir = getChaptersDirectory(options.cwd);
+  const errors: RenderStoryChaptersResult["errors"] = [];
+  if (options.projectId) {
+    migrateLegacyStoryArtifacts(options.cwd, options.projectId, project);
+  }
+  const chaptersDir = getStoryArtifactPaths(options.cwd, options.projectId).chapters;
   const maxConcurrency = normalizeConcurrency(options.maxConcurrency);
   const chaptersToRender: {
     chapterId: string;
@@ -631,8 +651,18 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
     }
 
     const isDirty = project.dirtyChapters.some((entry) => normalizeChapterId(entry) === chapterId);
+    const chapterPath = path.join(chaptersDir, `${chapterId}.md`);
+    const chapterNumber = parseChapterNumber(chapterId);
 
-    if (!isDirty && !options.force) {
+    if (chapterNumber === null || !project.outline.some((entry) => entry.number === chapterNumber)) {
+      errors.push({
+        chapterId,
+        message: `Unknown chapter id: ${chapterId}.`
+      });
+      continue;
+    }
+
+    if (!isDirty && !options.force && fs.existsSync(chapterPath)) {
       skipped.push(chapterId);
       continue;
     }
@@ -667,27 +697,71 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
         options.style || undefined,
         promptContext
       );
-      const chapterText = await options.runner({
-        cwd: options.cwd,
-        model: options.model,
-        prompt,
-        stage: `render-${chapter.chapterId}`,
-        signal: options.abortSignal
-      });
-      const chapterPath = path.join(chaptersDir, `${chapter.chapterId}.md`);
-      const normalizedChapterText = normalizeRenderedChapterText(chapterText);
+      try {
+        const chapterText = await options.runner({
+          cwd: options.cwd,
+          model: options.model,
+          prompt,
+          stage: `render-${chapter.chapterId}`,
+          signal: options.abortSignal
+        });
+        const chapterPath = path.join(chaptersDir, `${chapter.chapterId}.md`);
+        let normalizedChapterText = normalizeRenderedChapterText(chapterText);
 
-      fs.writeFileSync(chapterPath, `${normalizedChapterText}\n`, "utf8");
+        if (!normalizedChapterText) {
+          throw new Error("The model returned an empty chapter.");
+        }
 
-      return {
-        chapterId: chapter.chapterId,
-        chapterPath,
-        commitIds: chapter.commitIds
-      };
+        if (options.validateOutput) {
+          const gateResult = await runChapterValidationRepairGate({
+            cwd: options.cwd,
+            model: options.model,
+            project,
+            chapterId: chapter.chapterId,
+            text: normalizedChapterText,
+            runner: options.runner,
+            maxRepairAttempts: options.maxRepairAttempts,
+            abortSignal: options.abortSignal
+          });
+          normalizedChapterText = normalizeRenderedChapterText(gateResult.text);
+          if (!gateResult.report.passed) {
+            throw new Error(
+              gateResult.report.issues.map((issue) => issue.message).join("; ")
+            );
+          }
+        }
+
+        fs.writeFileSync(chapterPath, `${normalizedChapterText}\n`, "utf8");
+
+        return {
+          ok: true as const,
+          chapterId: chapter.chapterId,
+          chapterPath,
+          commitIds: chapter.commitIds
+        };
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          throw error;
+        }
+
+        return {
+          ok: false as const,
+          chapterId: chapter.chapterId,
+          message: error instanceof Error ? error.message : String(error)
+        };
+      }
     }
   );
 
   for (const output of renderedOutputs) {
+    if (!output.ok) {
+      errors.push({
+        chapterId: output.chapterId,
+        message: output.message
+      });
+      continue;
+    }
+
     upsertChapterRender(
       project,
       output.chapterId,
@@ -706,12 +780,14 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
   return {
     project,
     rendered,
-    skipped
+    skipped,
+    errors
   };
 }
 
 export interface CompileStoryChaptersOptions {
   cwd: string;
+  projectId?: string | null;
   project: StoryProject;
   chapterIds: readonly string[];
   outputPath: string | null;
@@ -721,13 +797,18 @@ export interface CompileStoryChaptersResult {
   outputPath: string;
   compiledChapters: string[];
   missingChapters: string[];
+  wroteOutput: boolean;
 }
 
 export function compileStoryChapters(options: CompileStoryChaptersOptions): CompileStoryChaptersResult {
-  const chaptersDir = getChaptersDirectory(options.cwd);
+  if (options.projectId) {
+    migrateLegacyStoryArtifacts(options.cwd, options.projectId, options.project);
+  }
+  const artifactPaths = getStoryArtifactPaths(options.cwd, options.projectId);
+  const chaptersDir = artifactPaths.chapters;
   const outputPath = options.outputPath
     ? path.resolve(options.cwd, options.outputPath)
-    : path.join(options.cwd, ".storyforge", "manuscript", "story.md");
+    : path.join(artifactPaths.manuscript, "story.md");
   const missingChapters: string[] = [];
   const compiledChapters: string[] = [];
   const sections: string[] = [`# ${options.project.meta.title || "Untitled Story"}`, ""];
@@ -754,12 +835,17 @@ export function compileStoryChapters(options: CompileStoryChaptersOptions): Comp
     compiledChapters.push(chapterId);
   }
 
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, `${sections.join("\n").trimEnd()}\n`, "utf8");
+  const wroteOutput = compiledChapters.length > 0;
+
+  if (wroteOutput) {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, `${sections.join("\n").trimEnd()}\n`, "utf8");
+  }
 
   return {
     outputPath,
     compiledChapters,
-    missingChapters
+    missingChapters,
+    wroteOutput
   };
 }

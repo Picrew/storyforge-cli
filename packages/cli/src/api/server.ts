@@ -1,5 +1,5 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   ApiServiceError,
   executeStoryCiRequest,
@@ -27,6 +27,7 @@ export interface StoryforgeApiServerOptions {
   asyncRunConcurrency?: number;
   asyncRunQueueLimit?: number;
   asyncRunTimeoutMs?: number;
+  apiToken?: string;
 }
 
 type ApiTaskStatus = "queued" | "running" | "succeeded" | "failed";
@@ -107,9 +108,26 @@ function cleanPathname(value: string): string {
 
 function setCommonHeaders(response: ServerResponse): void {
   response.setHeader("Content-Type", "application/json; charset=utf-8");
-  response.setHeader("Access-Control-Allow-Origin", "*");
   response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("Cache-Control", "no-store");
+}
+
+function isAuthorized(request: IncomingMessage, apiToken: string | null): boolean {
+  if (!apiToken) {
+    return true;
+  }
+
+  const authorization = request.headers.authorization ?? "";
+  const supplied = authorization.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length).trim()
+    : "";
+  const expectedBuffer = Buffer.from(apiToken);
+  const suppliedBuffer = Buffer.from(supplied);
+
+  return expectedBuffer.length === suppliedBuffer.length &&
+    timingSafeEqual(expectedBuffer, suppliedBuffer);
 }
 
 function canWriteResponse(response: ServerResponse): boolean {
@@ -390,6 +408,7 @@ export function createStoryforgeApiServer(
     | "asyncRunConcurrency"
     | "asyncRunQueueLimit"
     | "asyncRunTimeoutMs"
+    | "apiToken"
   > = {}
 ): http.Server {
   const bodyLimitBytes = normalizePositiveInteger(options.bodyLimitBytes, DEFAULT_BODY_LIMIT_BYTES);
@@ -409,6 +428,7 @@ export function createStoryforgeApiServer(
     options.asyncRunTimeoutMs,
     DEFAULT_ASYNC_RUN_TIMEOUT_MS
   );
+  const apiToken = options.apiToken?.trim() || null;
   const cleanupTimer = setInterval(() => {
     taskStore.cleanupExpired();
   }, taskCleanupIntervalMs);
@@ -445,6 +465,10 @@ export function createStoryforgeApiServer(
           timestamp: nowIso()
         });
         return;
+      }
+
+      if (!isAuthorized(request, apiToken)) {
+        throw new ApiServiceError("Unauthorized.", 4010, 401);
       }
 
       if (method === "GET") {
@@ -701,6 +725,12 @@ export async function startStoryforgeApiServer(
     options.asyncRunQueueLimit ?? readPositiveIntegerEnv("STORYFORGE_API_ASYNC_RUN_QUEUE_LIMIT");
   const asyncRunTimeoutMs =
     options.asyncRunTimeoutMs ?? readPositiveIntegerEnv("STORYFORGE_API_ASYNC_RUN_TIMEOUT_MS");
+  const apiToken = options.apiToken?.trim() || process.env.STORYFORGE_API_TOKEN?.trim();
+
+  if (host !== "127.0.0.1" && host !== "::1" && host !== "localhost" && !apiToken) {
+    throw new Error("STORYFORGE_API_TOKEN is required when binding the API server beyond localhost.");
+  }
+
   const server = createStoryforgeApiServer({
     bodyLimitBytes,
     taskTtlMs,
@@ -708,7 +738,8 @@ export async function startStoryforgeApiServer(
     taskMaxEntries,
     asyncRunConcurrency,
     asyncRunQueueLimit,
-    asyncRunTimeoutMs
+    asyncRunTimeoutMs,
+    apiToken
   });
 
   await new Promise<void>((resolve, reject) => {

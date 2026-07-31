@@ -30,6 +30,12 @@ export function CommandPreview({
   items,
   selectedIndex
 }: CommandPreviewProps): React.JSX.Element {
+  const narrow = width < 40;
+  const boundedSelectedIndex = Math.min(selectedIndex, Math.max(0, items.length - 1));
+  const windowStart = narrow
+    ? Math.max(0, Math.min(boundedSelectedIndex - 3, items.length - 7))
+    : 0;
+  const visibleItems = narrow ? items.slice(windowStart, windowStart + 7) : items;
   const divider = " ".repeat(Math.max(8, width - 4));
   const commandWidth = Math.max(10, Math.min(18, Math.floor(width * 0.22)));
   const descriptionWidth = Math.max(16, width - commandWidth - 8);
@@ -42,8 +48,21 @@ export function CommandPreview({
       borderColor={themeTokens.textSecondary}
       paddingX={1}
     >
-      {items.map((item, index) => {
-        const isSelected = index === Math.min(selectedIndex, items.length - 1);
+      {visibleItems.map((item, index) => {
+        const actualIndex = windowStart + index;
+        const isSelected = actualIndex === boundedSelectedIndex;
+
+        if (narrow) {
+          return (
+            <Text
+              key={item.command}
+              color={isSelected ? "black" : themeTokens.textSecondary}
+              backgroundColor={isSelected ? themeTokens.accentSecondary : undefined}
+            >
+              {truncateEnd(`${isSelected ? "> " : "  "}${item.command} ${item.description}`, width - 4)}
+            </Text>
+          );
+        }
 
         return (
           <Box key={item.command}>
@@ -67,16 +86,20 @@ export function CommandPreview({
         );
       })}
       <Text color={themeTokens.textSecondary}>{divider}</Text>
-      <Box>
-        <Text color={themeTokens.accent}>tab</Text>
-        <Text color={themeTokens.textSecondary}> autocomplete</Text>
-        <Text color={themeTokens.textSecondary}>  </Text>
-        <Text color={themeTokens.accent}>enter</Text>
-        <Text color={themeTokens.textSecondary}> select</Text>
-        <Text color={themeTokens.textSecondary}>  </Text>
-        <Text color={themeTokens.accent}>esc</Text>
-        <Text color={themeTokens.textSecondary}> close</Text>
-      </Box>
+      {narrow ? (
+        <Text color={themeTokens.textSecondary}>↑↓ move  enter  esc</Text>
+      ) : (
+        <Box>
+          <Text color={themeTokens.accent}>tab</Text>
+          <Text color={themeTokens.textSecondary}> autocomplete</Text>
+          <Text color={themeTokens.textSecondary}>  </Text>
+          <Text color={themeTokens.accent}>enter</Text>
+          <Text color={themeTokens.textSecondary}> select</Text>
+          <Text color={themeTokens.textSecondary}>  </Text>
+          <Text color={themeTokens.accent}>esc</Text>
+          <Text color={themeTokens.textSecondary}> close</Text>
+        </Box>
+      )}
     </Box>
   );
 }

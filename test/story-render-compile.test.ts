@@ -66,6 +66,170 @@ function createProjectForRender(chapterCount: number = 1) {
 }
 
 describe("story render and compile", () => {
+  it("isolates chapter and manuscript artifacts by project id", async () => {
+    const cwd = makeTempDir();
+    const firstProject = createProjectForRender();
+    const secondProject = createProjectForRender();
+    const runner: StructuredRunner = async ({ prompt }) =>
+      prompt.includes("First Project") ? "First project prose" : "Second project prose";
+
+    firstProject.meta.title = "First Project";
+    secondProject.meta.title = "Second Project";
+
+    await renderStoryChapters({
+      cwd,
+      projectId: "project-a",
+      model: "deepseek/deepseek-v4-flash",
+      project: firstProject,
+      chapterIds: ["ch01"],
+      style: null,
+      force: true,
+      runner
+    });
+    await renderStoryChapters({
+      cwd,
+      projectId: "project-b",
+      model: "deepseek/deepseek-v4-flash",
+      project: secondProject,
+      chapterIds: ["ch01"],
+      style: null,
+      force: true,
+      runner
+    });
+
+    const firstCompile = compileStoryChapters({
+      cwd,
+      projectId: "project-a",
+      project: firstProject,
+      chapterIds: ["ch01"],
+      outputPath: null
+    });
+    const secondCompile = compileStoryChapters({
+      cwd,
+      projectId: "project-b",
+      project: secondProject,
+      chapterIds: ["ch01"],
+      outputPath: null
+    });
+
+    expect(fs.readFileSync(firstCompile.outputPath, "utf8")).toContain("First project prose");
+    expect(fs.readFileSync(secondCompile.outputPath, "utf8")).toContain("Second project prose");
+    expect(firstCompile.outputPath).not.toBe(secondCompile.outputPath);
+  });
+
+  it("does not create a title-only manuscript when every chapter is missing", () => {
+    const cwd = makeTempDir();
+    const result = compileStoryChapters({
+      cwd,
+      projectId: "empty-project",
+      project: createProjectForRender(),
+      chapterIds: ["ch01"],
+      outputPath: null
+    });
+
+    expect(result.wroteOutput).toBe(false);
+    expect(result.compiledChapters).toEqual([]);
+    expect(fs.existsSync(result.outputPath)).toBe(false);
+  });
+
+  it("migrates legacy chapter artifacts once into the owning project", () => {
+    const cwd = makeTempDir();
+    const project = createProjectForRender();
+    const legacyChapterPath = path.join(cwd, ".storyforge", "chapters", "ch01.md");
+    fs.mkdirSync(path.dirname(legacyChapterPath), { recursive: true });
+    fs.writeFileSync(legacyChapterPath, "Legacy project prose.\n", "utf8");
+    fs.mkdirSync(path.join(cwd, ".storyforge", "logs"), { recursive: true });
+    fs.writeFileSync(path.join(cwd, ".storyforge", "logs", "legacy.log"), "legacy log\n", "utf8");
+    fs.mkdirSync(path.join(cwd, ".storyforge", "cache"), { recursive: true });
+    fs.writeFileSync(path.join(cwd, ".storyforge", "cache", "legacy.json"), "{}\n", "utf8");
+    project.chapterRenders.push({
+      chapterId: "ch01",
+      file: "chapters/ch01.md",
+      renderedAt: "2026-03-12T00:00:00.000Z",
+      model: "deepseek/deepseek-chat",
+      commitIds: ["commit-1"],
+      dirty: false
+    });
+
+    const result = compileStoryChapters({
+      cwd,
+      projectId: "migrated-project",
+      project,
+      chapterIds: ["ch01"],
+      outputPath: null
+    });
+    const migratedChapterPath = path.join(
+      cwd,
+      ".storyforge",
+      "artifacts",
+      "migrated-project",
+      "chapters",
+      "ch01.md"
+    );
+    const markerPath = path.join(
+      cwd,
+      ".storyforge",
+      "artifacts",
+      "migrated-project",
+      "cache",
+      "artifact-migration-v1.json"
+    );
+
+    expect(result.wroteOutput).toBe(true);
+    expect(fs.readFileSync(migratedChapterPath, "utf8")).toContain("Legacy project prose");
+    expect(fs.existsSync(markerPath)).toBe(true);
+    expect(project.chapterRenders[0].file).toBe(
+      "artifacts/migrated-project/chapters/ch01.md"
+    );
+    expect(fs.existsSync(legacyChapterPath)).toBe(true);
+    expect(fs.existsSync(path.join(
+      cwd,
+      ".storyforge",
+      "artifacts",
+      "migrated-project",
+      "logs",
+      "legacy.log"
+    ))).toBe(true);
+    expect(fs.existsSync(path.join(
+      cwd,
+      ".storyforge",
+      "artifacts",
+      "migrated-project",
+      "cache",
+      "legacy.json"
+    ))).toBe(true);
+  });
+
+  it("does not finalize migration when no legacy source exists", () => {
+    const cwd = makeTempDir();
+    const project = createProjectForRender();
+    project.chapterRenders.push({
+      chapterId: "ch01",
+      file: "chapters/ch01.md",
+      renderedAt: "2026-03-12T00:00:00.000Z",
+      model: "deepseek/deepseek-chat",
+      commitIds: ["commit-1"],
+      dirty: false
+    });
+
+    compileStoryChapters({
+      cwd,
+      projectId: "missing-legacy",
+      project,
+      chapterIds: ["ch01"],
+      outputPath: null
+    });
+
+    expect(fs.existsSync(path.join(
+      cwd,
+      ".storyforge",
+      "artifacts",
+      "missing-legacy",
+      "cache",
+      "artifact-migration-v1.json"
+    ))).toBe(false);
+  });
+
   it("renders dirty chapters to markdown files and updates metadata", async () => {
     const cwd = makeTempDir();
     const runner: StructuredRunner = async ({ stage }) =>

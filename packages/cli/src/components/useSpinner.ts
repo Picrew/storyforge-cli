@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
-const INTERVAL_MS = 80;
+const INTERVAL_MS = 240;
 
 export function useSpinner(active: boolean): string {
   const [frameIndex, setFrameIndex] = useState(0);

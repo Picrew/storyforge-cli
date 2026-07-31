@@ -23,13 +23,7 @@ interface CursorLineInfo {
 }
 
 function charCount(str: string): number {
-  let count = 0;
-
-  for (const _char of str) {
-    count += 1;
-  }
-
-  return count;
+  return [...str].length;
 }
 
 function buildCursorLines(value: string, cursorPosition: number, lineWidth: number): CursorLineInfo {
@@ -75,7 +69,6 @@ function buildCursorLines(value: string, cursorPosition: number, lineWidth: numb
     // Account for newline character between paragraphs
     if (lineIndex < lines.length - 1) {
       // Check if next chars are newline
-      let offset = 0;
       let count = 0;
 
       for (const char of value) {
@@ -87,7 +80,6 @@ function buildCursorLines(value: string, cursorPosition: number, lineWidth: numb
           break;
         }
 
-        offset += char.length;
         count += 1;
       }
     }

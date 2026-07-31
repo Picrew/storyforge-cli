@@ -24,6 +24,7 @@ import {
   renderStoryChapters,
   runStoryCi
 } from "../story/simulation.js";
+import { ensureStoryArtifactDirectories } from "../story/artifact-store.js";
 import type {
   ChapterPlan,
   StoryProject
@@ -53,6 +54,29 @@ function resolveDefaultApiOutputRoot(): string {
 export const DEFAULT_API_OUTPUT_ROOT = resolveDefaultApiOutputRoot();
 
 const DEFAULT_MODEL_TIMEOUT_MS = 180_000;
+const projectMutationTails = new Map<string, Promise<void>>();
+
+async function withProjectMutationLock<T>(
+  key: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previous = projectMutationTails.get(key) ?? Promise.resolve();
+  let release = (): void => {};
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  projectMutationTails.set(key, current);
+  await previous;
+
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (projectMutationTails.get(key) === current) {
+      projectMutationTails.delete(key);
+    }
+  }
+}
 
 export class ApiServiceError extends Error {
   code: number;
@@ -179,6 +203,11 @@ export interface StoryCompileRequest {
 export interface StoryRunProgress {
   stage: string;
   message: string;
+  stage_index?: number;
+  total_stages?: number;
+  elapsed_ms?: number;
+  retry_count?: number;
+  checkpoint_path?: string;
 }
 
 export interface StoryRunResult {
@@ -206,6 +235,7 @@ export interface StoryRunResult {
     chapter_ids: string[];
     rendered: string[];
     skipped: string[];
+    errors?: Array<{ chapterId: string; message: string }>;
   };
   compile: {
     compiled_chapters: string[];
@@ -768,11 +798,25 @@ async function runBootstrapFromPrompt(options: {
 
   const result = await runStoryTask({
     cwd: options.workspaceDir,
+    projectId: options.projectId,
     model: options.model,
     project: bootProject,
     runner: options.runner,
     scope: "all",
     abortSignal: options.abortSignal,
+    onCheckpoint: (checkpoint) => {
+      options.onProgress?.({
+        stage: checkpoint.currentStage ?? checkpoint.status,
+        message: checkpoint.currentStage
+          ? `Stage ${checkpoint.stageIndex}/${checkpoint.totalStages}: ${checkpoint.currentStage}`
+          : `Task ${checkpoint.status}.`,
+        stage_index: checkpoint.stageIndex,
+        total_stages: checkpoint.totalStages,
+        elapsed_ms: checkpoint.elapsedMs,
+        retry_count: checkpoint.retryCount,
+        checkpoint_path: checkpoint.checkpointPath
+      });
+    },
     onStageStart: ({ stage, message }) => {
       options.onProgress?.({
         stage: `bootstrap:${stage}:start`,
@@ -838,11 +882,25 @@ async function runRefresh(options: {
 
   const result = await runStoryTask({
     cwd: options.context.workspaceDir,
+    projectId: options.context.projectId,
     model: options.model,
     project: bootProject,
     runner: options.runner,
     scope: options.scope,
     abortSignal: options.abortSignal,
+    onCheckpoint: (checkpoint) => {
+      options.onProgress?.({
+        stage: checkpoint.currentStage ?? checkpoint.status,
+        message: checkpoint.currentStage
+          ? `Stage ${checkpoint.stageIndex}/${checkpoint.totalStages}: ${checkpoint.currentStage}`
+          : `Task ${checkpoint.status}.`,
+        stage_index: checkpoint.stageIndex,
+        total_stages: checkpoint.totalStages,
+        elapsed_ms: checkpoint.elapsedMs,
+        retry_count: checkpoint.retryCount,
+        checkpoint_path: checkpoint.checkpointPath
+      });
+    },
     onStageStart: ({ stage, message }) => {
       options.onProgress?.({
         stage: `refresh:${stage}:start`,
@@ -874,11 +932,11 @@ async function runRefresh(options: {
 function materializeCompileOutputPath(
   workspaceDir: string,
   outputPath: string | undefined | null
-): string {
+): string | null {
   const maybePath = asOptionalString(outputPath);
 
   if (!maybePath) {
-    return path.join(workspaceDir, "manuscript.md");
+    return null;
   }
 
   return path.isAbsolute(maybePath)
@@ -888,11 +946,13 @@ function materializeCompileOutputPath(
 
 function writeRunArtifacts(
   workspaceDir: string,
+  projectId: string,
   project: StoryProject,
   summary: Record<string, unknown>
 ): { projectPath: string; summaryPath: string } {
-  const projectPath = path.join(workspaceDir, "project.json");
-  const summaryPath = path.join(workspaceDir, "run-summary.json");
+  const artifactPaths = ensureStoryArtifactDirectories(workspaceDir, projectId);
+  const projectPath = path.join(artifactPaths.logs, "project-snapshot.json");
+  const summaryPath = path.join(artifactPaths.logs, "run-summary.json");
 
   fs.writeFileSync(projectPath, `${JSON.stringify(project, null, 2)}\n`, "utf8");
   fs.writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
@@ -1105,35 +1165,47 @@ export async function executeStoryRenderRequest(request: StoryRenderRequest): Pr
   chapter_ids: string[];
   rendered: string[];
   skipped: string[];
+  errors: Array<{ chapter_id: string; message: string }>;
 }> {
-  const context = loadWorkspaceProject(request.workspace_dir, request.project_id);
-  const chapterIds = resolveChapterIds(context.project, request.chapter_range, request.chapter_ids);
-  const runtime = resolveModelRuntime(request.model_config);
+  const initialContext = loadWorkspaceProject(request.workspace_dir, request.project_id);
+  const lockKey = `${initialContext.workspaceDir}\0${initialContext.projectId}`;
 
-  const result = await renderStoryChapters({
-    cwd: context.workspaceDir,
-    model: runtime.model,
-    project: context.project,
-    chapterIds,
-    style: asOptionalString(request.style) ?? null,
-    force: request.force === true,
-    runner: runtime.runner,
-    maxConcurrency:
-      typeof request.max_concurrency === "number" && Number.isFinite(request.max_concurrency)
-        ? Math.max(1, Math.floor(request.max_concurrency))
-        : 1
+  return withProjectMutationLock(lockKey, async () => {
+    const context = loadWorkspaceProject(request.workspace_dir, request.project_id);
+    const chapterIds = resolveChapterIds(context.project, request.chapter_range, request.chapter_ids);
+    const runtime = resolveModelRuntime(request.model_config);
+
+    const result = await renderStoryChapters({
+      cwd: context.workspaceDir,
+      projectId: context.projectId,
+      model: runtime.model,
+      project: context.project,
+      chapterIds,
+      style: asOptionalString(request.style) ?? null,
+      force: request.force === true,
+      validateOutput: true,
+      runner: runtime.runner,
+      maxConcurrency:
+        typeof request.max_concurrency === "number" && Number.isFinite(request.max_concurrency)
+          ? Math.max(1, Math.floor(request.max_concurrency))
+          : 1
+    });
+
+    persistProject(context, result.project);
+
+    return {
+      workspace_dir: context.workspaceDir,
+      project_id: context.projectId,
+      project: result.project,
+      chapter_ids: chapterIds,
+      rendered: result.rendered,
+      skipped: result.skipped,
+      errors: result.errors.map((entry) => ({
+        chapter_id: entry.chapterId,
+        message: entry.message
+      }))
+    };
   });
-
-  persistProject(context, result.project);
-
-  return {
-    workspace_dir: context.workspaceDir,
-    project_id: context.projectId,
-    project: result.project,
-    chapter_ids: chapterIds,
-    rendered: result.rendered,
-    skipped: result.skipped
-  };
 }
 
 export function executeStoryCompileRequest(request: StoryCompileRequest): {
@@ -1149,10 +1221,17 @@ export function executeStoryCompileRequest(request: StoryCompileRequest): {
 
   const result = compileStoryChapters({
     cwd: context.workspaceDir,
+    projectId: context.projectId,
     project: context.project,
     chapterIds,
     outputPath
   });
+
+  if (!result.wroteOutput) {
+    throwValidation(
+      `No chapter files were available to compile (${result.missingChapters.join(", ") || "none requested"}).`
+    );
+  }
 
   return {
     workspace_dir: context.workspaceDir,
@@ -1318,11 +1397,13 @@ export async function executeStoryRunRequest(
 
   const renderResult = await renderStoryChapters({
     cwd: workspaceDir,
+    projectId: createResult.projectId,
     model: runtime.model,
     project,
     chapterIds: renderChapterIds,
     style: asOptionalString(request.render?.style) ?? null,
     force: request.render?.force === false ? false : true,
+    validateOutput: true,
     runner: countedRunner,
     abortSignal: runSignal,
     maxConcurrency:
@@ -1340,6 +1421,14 @@ export async function executeStoryRunRequest(
     renderResult.project
   );
 
+  if (renderResult.errors.length > 0) {
+    throwInternal(
+      `Render validation failed: ${renderResult.errors
+        .map((entry) => `${entry.chapterId}: ${entry.message}`)
+        .join("; ")}`
+    );
+  }
+
   const compileChapterIds = resolveChapterIds(
     project,
     request.compile?.chapter_range ?? request.render?.chapter_range,
@@ -1355,10 +1444,14 @@ export async function executeStoryRunRequest(
 
   const compileResult = compileStoryChapters({
     cwd: workspaceDir,
+    projectId: createResult.projectId,
     project,
     chapterIds: compileChapterIds,
     outputPath: manuscriptPath
   });
+  if (!compileResult.wroteOutput) {
+    throwInternal("Compile produced no manuscript because every requested chapter was missing.");
+  }
   const elapsedMs = Math.max(0, Date.now() - runStartedAt);
 
   const summary = {
@@ -1382,7 +1475,8 @@ export async function executeStoryRunRequest(
     render: {
       chapter_ids: renderChapterIds,
       rendered: renderResult.rendered,
-      skipped: renderResult.skipped
+      skipped: renderResult.skipped,
+      errors: renderResult.errors
     },
     compile: {
       compiled_chapters: compileResult.compiledChapters,
@@ -1390,7 +1484,7 @@ export async function executeStoryRunRequest(
       output_path: compileResult.outputPath
     }
   };
-  const artifacts = writeRunArtifacts(workspaceDir, project, summary);
+  const artifacts = writeRunArtifacts(workspaceDir, createResult.projectId, project, summary);
 
   onProgress?.({
     stage: "done",

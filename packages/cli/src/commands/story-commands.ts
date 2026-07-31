@@ -107,6 +107,13 @@ export interface StoryCommandCompileResult {
   outputPath: string | null;
 }
 
+export interface StoryCommandValidateResult {
+  type: "validate";
+  message: string;
+  chapterIds: string[];
+  repair: boolean;
+}
+
 export interface StoryCommandUnhandledResult {
   type: "not-handled";
 }
@@ -124,6 +131,7 @@ export type StoryCommandResult =
   | StoryCommandCiResult
   | StoryCommandRenderResult
   | StoryCommandCompileResult
+  | StoryCommandValidateResult
   | StoryCommandUnhandledResult;
 
 function cloneProject(project: StoryProject): StoryProject {
@@ -234,7 +242,7 @@ interface ParsedCommandFlags {
   valueFlags: Map<string, string>;
 }
 
-const KNOWN_BOOLEAN_FLAGS = new Set(["force", "all", "visual"]);
+const KNOWN_BOOLEAN_FLAGS = new Set(["force", "all", "visual", "repair"]);
 
 function parseCommandFlags(args: readonly string[]): ParsedCommandFlags {
   const positional: string[] = [];
@@ -571,10 +579,29 @@ export function handleStoryCommand(
   parsedCommand: ParsedCommand
 ): StoryCommandResult {
   switch (parsedCommand.command) {
+    case "/help":
+      return {
+        type: "notice",
+        message: [
+          "Core: /connect, /models, /status, /projects",
+          "Story: /init, /world, /char, /timeline, /outline",
+          "Pipeline: /commit, /ci, /render, /compile, /validate",
+          "Recovery: /cancel, /retry, /resume",
+          "Use quoted paths when they contain spaces, e.g. /init --dir \"My Story\"."
+        ].join("\n")
+      };
+
     case "/init": {
       const initParsed = parseCommandFlags(parsedCommand.args);
       const initDir = initParsed.valueFlags.get("dir")?.trim() || undefined;
       const initPositional = initParsed.positional;
+
+      if (initParsed.booleanFlags.has("dir")) {
+        return {
+          type: "notice",
+          message: "Missing value for --dir. Usage: /init --dir <path>"
+        };
+      }
 
       if (initPositional.length === 0) {
         const nextProject = createBlankStoryProject(undefined, getUntitledTitle(context.projects));
@@ -982,6 +1009,13 @@ export function handleStoryCommand(
       const force = parsed.booleanFlags.has("force");
       const eventText = parsed.positional.join(" ").trim();
 
+      if (parsed.booleanFlags.has("patch-file")) {
+        return {
+          type: "notice",
+          message: "Missing value for --patch-file."
+        };
+      }
+
       if (!chapterId) {
         return {
           type: "notice",
@@ -1179,6 +1213,40 @@ export function handleStoryCommand(
         message: `Compiling ${chapterIds.length} chapter(s)...`,
         chapterIds,
         outputPath: parsed.valueFlags.get("output")?.trim() || null
+      };
+    }
+
+    case "/validate": {
+      if (!context.currentProject) {
+        return {
+          type: "notice",
+          message: "Run /init first to create a story project."
+        };
+      }
+      const parsed = parseCommandFlags(parsedCommand.args);
+      if (parsed.positional.length > 1) {
+        return {
+          type: "notice",
+          message: "Usage: /validate [chNN|chNN..chMM|all] [--repair]"
+        };
+      }
+      const rangeToken = parsed.positional[0]?.toLowerCase() ?? "all";
+      const chapterIds = rangeToken === "all"
+        ? getKnownChapterIds(context.currentProject)
+        : parseChapterRange(rangeToken);
+      if (!chapterIds) {
+        return {
+          type: "notice",
+          message: "Validation range is invalid."
+        };
+      }
+      return {
+        type: "validate",
+        message: parsed.booleanFlags.has("repair")
+          ? "Validating and repairing failed sections..."
+          : "Validating story structure and chapter artifacts...",
+        chapterIds,
+        repair: parsed.booleanFlags.has("repair")
       };
     }
 

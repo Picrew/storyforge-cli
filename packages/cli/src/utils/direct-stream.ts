@@ -343,7 +343,6 @@ export function startDirectStream({
       let currentMessages = [...messages];
       let toolRoundsLeft = 3;
 
-      // eslint-disable-next-line no-constant-condition
       while (true) {
         const includeTools = tavilyApiKey && toolRoundsLeft > 0;
 

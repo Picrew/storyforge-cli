@@ -12,10 +12,15 @@ export interface CommandPreviewItem {
     | "ci"
     | "render"
     | "compile"
+    | "validate"
     | "world"
     | "characters"
     | "timeline"
     | "outline"
+    | "help"
+    | "cancel"
+    | "retry"
+    | "resume"
     | "clear"
     | "exit";
   aliases?: readonly string[];
@@ -75,6 +80,11 @@ const commandPreviewItems: readonly CommandPreviewItem[] = [
     action: "compile"
   },
   {
+    command: "/validate",
+    description: "Check story structure and repair failed sections",
+    action: "validate"
+  },
+  {
     command: "/world",
     description: "Show or edit world state",
     action: "world"
@@ -93,6 +103,26 @@ const commandPreviewItems: readonly CommandPreviewItem[] = [
     command: "/outline",
     description: "Show or edit chapter plan",
     action: "outline"
+  },
+  {
+    command: "/help",
+    description: "Show command help",
+    action: "help"
+  },
+  {
+    command: "/cancel",
+    description: "Cancel running task and keep checkpoint",
+    action: "cancel"
+  },
+  {
+    command: "/retry",
+    description: "Retry latest failed checkpoint",
+    action: "retry"
+  },
+  {
+    command: "/resume",
+    description: "Resume latest incomplete checkpoint",
+    action: "resume"
   },
   {
     command: "/clear",

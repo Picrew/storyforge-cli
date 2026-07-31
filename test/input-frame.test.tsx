@@ -27,6 +27,7 @@ import {
   moveInputCursorToStart,
   moveInputCursorToEnd,
   openConnectAuthModeModal,
+  openConnectCredentialsModal,
   openConnectProviderModal,
   openModelPickerModal
 } from "../packages/cli/src/state/app-state.js";
@@ -55,6 +56,27 @@ function makeTempDir(): string {
 }
 
 describe("Input frame interactions", () => {
+  it("masks API keys in the credentials dialog", () => {
+    const secret = "sk-secret-value";
+    const opened = openConnectCredentialsModal(
+      createInitialAppState(100),
+      "deepseek",
+      "API key",
+      "Stored locally"
+    );
+    const state = {
+      ...opened,
+      modal: opened.modal?.kind === "connect-credentials"
+        ? { ...opened.modal, apiKeyValue: secret }
+        : opened.modal
+    };
+    const app = render(<AppShell state={state} terminalWidth={100} cwd="/tmp/storyforge" />);
+
+    expect(app.lastFrame()).not.toContain(secret);
+    expect(app.lastFrame()).toContain("•".repeat(secret.length));
+    app.unmount();
+  });
+
   it("shows the placeholder when the input is empty", () => {
     const app = render(
       <AppShell state={createInitialAppState(100)} terminalWidth={100} cwd="/tmp/storyforge" />

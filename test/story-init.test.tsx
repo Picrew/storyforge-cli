@@ -6,6 +6,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render } from "ink-testing-library";
 import {
   createBlankStoryProject,
+  createStoryProject,
   getStoryProjectAbsolutePath,
   getStoryProjectPath,
   loadStoryWorkspace,
@@ -15,6 +16,8 @@ import type {
   StructuredRunOptions,
   StructuredRunner
 } from "../packages/cli/src/story/structured-run.js";
+import { ensureStoryArtifactDirectories } from "../packages/cli/src/story/artifact-store.js";
+import { findLatestIncompleteStoryTaskCheckpoint } from "../packages/cli/src/story/task-checkpoint.js";
 
 const { chatStreamSpy, syncApiCredentialMock, syncOauthCredentialMock } = vi.hoisted(() => ({
   chatStreamSpy: vi.fn(),
@@ -143,14 +146,14 @@ function createStructuredRunner(
             {
               label: "Arrival",
               summary: "Mira arrives ready to pitch.",
-              chapterRef: "1",
+              chapterRef: "ch01",
               stakes: "Funding depends on first impressions.",
               notes: "Open with comic tension."
             },
             {
               label: "Reveal",
               summary: "An old friend exposes the cult connection.",
-              chapterRef: "1-2",
+              chapterRef: "ch02",
               stakes: "Mira fears public embarrassment.",
               notes: "Keep the cult harmless."
             }
@@ -215,6 +218,80 @@ beforeEach(() => {
 });
 
 describe("story init flow", () => {
+  it("clears the pending state after synchronous compile completes", async () => {
+    const cwd = makeTempDir();
+    const project = createBlankStoryProject(undefined, "Compile State");
+    project.outline.push({
+      id: "outline-1",
+      number: 1,
+      title: "Opening",
+      purpose: "",
+      summary: "",
+      hook: "",
+      targetWords: 10
+    });
+    const created = createStoryProject(cwd, project);
+    const projectId = created.projectId!;
+    const paths = ensureStoryArtifactDirectories(cwd, projectId);
+    fs.writeFileSync(path.join(paths.chapters, "ch01.md"), "Compiled prose.\n", "utf8");
+    const app = render(
+      <App
+        terminalWidthOverride={100}
+        cwdOverride={cwd}
+        initialConfigOverride={{ connection: null, model: null }}
+      />
+    );
+
+    await submitInput(app, "/compile all");
+    await waitForCondition(() => (app.lastFrame() ?? "").includes("Compile completed."));
+
+    expect(app.lastFrame()).not.toContain("compile running");
+    expect(app.lastFrame()).toContain("Next: /validate all");
+    app.unmount();
+  });
+
+  it("accepts /cancel while a story task is pending and preserves its checkpoint", async () => {
+    const cwd = makeTempDir();
+    const runner: StructuredRunner = ({ signal }) => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => {
+        const error = new Error("cancelled in test");
+        error.name = "AbortError";
+        reject(error);
+      }, { once: true });
+    });
+    const app = render(
+      <App
+        terminalWidthOverride={100}
+        cwdOverride={cwd}
+        structuredRunnerOverride={runner}
+        initialConfigOverride={{
+          connection: {
+            provider: "deepseek",
+            authMode: "api",
+            apiKey: "test-key",
+            baseUrl: null,
+            authLabel: "test"
+          },
+          model: "deepseek/deepseek-v4-flash"
+        }}
+      />
+    );
+
+    await submitInput(app, "/init");
+    await waitForCondition(() => loadStoryWorkspace(cwd).activeProjectId !== null);
+    await submitInput(app, "A story that can be cancelled.");
+    await waitForCondition(() => (app.lastFrame() ?? "").includes("bootstrap running"));
+    await submitInput(app, "/cancel");
+    const projectId = loadStoryWorkspace(cwd).activeProjectId!;
+    await waitForCondition(
+      () => findLatestIncompleteStoryTaskCheckpoint(cwd, projectId)?.status === "cancelled"
+    );
+
+    expect(findLatestIncompleteStoryTaskCheckpoint(cwd, projectId)?.status).toBe("cancelled");
+    expect(app.lastFrame()).not.toContain("bootstrap running");
+    app.unmount();
+  });
+
   it("creates a blank scaffold with /init", async () => {
     const cwd = makeTempDir();
     const app = render(

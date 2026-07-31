@@ -43,7 +43,7 @@ export function AppShell({
   const condensedWelcome = shouldCondenseWelcome(contentWidth);
   const showCommandPreview = shouldShowCommandPreview(state.inputValue);
   const commandPreviewItems = showCommandPreview ? getCommandPreviewItems(state.inputValue) : [];
-  const overlayWidth = Math.max(32, Math.min(Math.max(terminalWidth - 4, 32), contentWidth));
+  const overlayWidth = Math.max(20, Math.min(Math.max(terminalWidth - 4, 20), contentWidth));
   const providerModal = state.modal?.kind === "connect-provider" ? state.modal : null;
   const authModeModal = state.modal?.kind === "connect-auth-mode" ? state.modal : null;
   const oauthModal = state.modal?.kind === "connect-oauth" ? state.modal : null;

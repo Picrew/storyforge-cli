@@ -198,4 +198,39 @@ describe("story project store", () => {
       fs.existsSync(getStoryProjectAbsolutePath(cwd, secondResult.projectId, workspace.projects))
     ).toBe(true);
   });
+
+  it("never falls back to the active project when an explicit project id is unknown", () => {
+    const cwd = makeTempDir();
+    const active = createBlankStoryProject(undefined, "Active Draft");
+    const created = createStoryProject(cwd, active);
+    const attacker = createBlankStoryProject(undefined, "Must Not Overwrite");
+
+    expect(created.projectId).toBeTruthy();
+    expect(saveStoryProject(cwd, attacker, "missing-project")).toBe(
+      "Unknown story project: missing-project"
+    );
+    expect(loadStoryProject(cwd, created.projectId)?.meta.title).toBe("Active Draft");
+  });
+
+  it("ignores project library entries whose files escape the workspace", () => {
+    const cwd = makeTempDir();
+    const workspacePath = path.join(cwd, ".storyforge", "workspace.json");
+
+    fs.mkdirSync(path.dirname(workspacePath), { recursive: true });
+    fs.writeFileSync(workspacePath, JSON.stringify({
+      version: 1,
+      activeProjectId: "outside",
+      projects: [{
+        id: "outside",
+        title: "Outside",
+        status: "ready",
+        createdAt: "2026-03-04T00:00:00.000Z",
+        updatedAt: "2026-03-04T00:00:00.000Z",
+        file: "../../outside.json"
+      }]
+    }));
+
+    expect(loadStoryWorkspace(cwd).projects).toEqual([]);
+    expect(loadStoryProject(cwd)).toBeNull();
+  });
 });

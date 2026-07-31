@@ -21,9 +21,21 @@ function formatTaskLabel(task: PendingTask): string {
     "story-commit": "commit",
     "story-ci": "ci",
     "story-render": "render",
-    "story-compile": "compile"
+    "story-compile": "compile",
+    "story-validate": "validate"
   };
   return kindLabels[task.kind] ?? task.kind;
+}
+
+function formatTaskProgress(task: PendingTask): string {
+  const stage = task.totalStages && task.stageIndex
+    ? ` stage ${task.stageIndex}/${task.totalStages}`
+    : "";
+  const elapsedMs = task.startedAt ? Math.max(0, Date.now() - task.startedAt) : 0;
+  const elapsed = elapsedMs >= 1_000 ? ` ${Math.floor(elapsedMs / 1_000)}s` : "";
+  const retries = task.retryCount ? ` retry ${task.retryCount}` : "";
+  const checkpoint = task.checkpointPath ? " checkpoint ✓" : "";
+  return ` running${stage}${elapsed}${retries}${checkpoint}`;
 }
 
 export function Footer({ cwd, width, pendingTask }: FooterProps): React.JSX.Element {
@@ -33,7 +45,7 @@ export function Footer({ cwd, width, pendingTask }: FooterProps): React.JSX.Elem
     if (pendingTask) {
       return (
         <Text color={themeTokens.accent}>
-          {spinnerFrame} {formatTaskLabel(pendingTask)} running
+          {spinnerFrame} {formatTaskLabel(pendingTask)}{formatTaskProgress(pendingTask)}
         </Text>
       );
     }
@@ -48,7 +60,7 @@ export function Footer({ cwd, width, pendingTask }: FooterProps): React.JSX.Elem
   const rightLabel = copy.footer.right;
   const statusIcon = pendingTask ? spinnerFrame : "✓";
   const statusText = pendingTask
-    ? `${formatTaskLabel(pendingTask)} running`
+    ? `${formatTaskLabel(pendingTask)}${formatTaskProgress(pendingTask)}`
     : copy.footer.center;
   const statusColor = pendingTask ? themeTokens.accent : themeTokens.success;
   const reservedWidth = statusText.length + rightLabel.length + 10;

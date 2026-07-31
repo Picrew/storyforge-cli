@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import React, { useEffect, useRef, useState } from "react";
 import { useApp, useInput, useStdout } from "ink";
@@ -77,7 +78,17 @@ import {
   renderStoryChapters,
   runStoryCi
 } from "../story/simulation.js";
+import {
+  runChapterValidationRepairGate,
+  runStoryValidationRepairGate,
+  validateStoryProject
+} from "../story/story-validation.js";
+import {
+  getStoryArtifactPaths,
+  writeStoryArtifactJson
+} from "../story/artifact-store.js";
 import type { StoryLibraryEntry, StoryProject } from "../story/types.js";
+import { findLatestIncompleteStoryTaskCheckpoint } from "../story/task-checkpoint.js";
 import { AppShell } from "./AppShell.js";
 import type {
   AppState,
@@ -165,7 +176,51 @@ function parseCommandInput(inputValue: string): { command: string; args: string[
     return null;
   }
 
-  const [command, ...args] = rawInput.split(/\s+/);
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  for (const character of rawInput) {
+    if (escaped) {
+      current += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+      } else {
+        current += character;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += character;
+  }
+
+  if (escaped) {
+    current += "\\";
+  }
+  if (current) {
+    tokens.push(current);
+  }
+
+  const [command = "", ...args] = tokens;
 
   return {
     command: command.toLowerCase(),
@@ -195,6 +250,7 @@ export function App({
   let initialStoryProjects: readonly StoryLibraryEntry[] = [];
   let initialStoryProject: StoryProject | null = null;
   let initialStoryLoadError: string | null = null;
+  let initialRecoveryNotice: string | null = null;
 
   try {
     const loadedWorkspace = loadStoryWorkspace(cwd);
@@ -202,6 +258,14 @@ export function App({
     initialStoryProjectId = loadedWorkspace.activeProjectId;
     initialStoryProjects = loadedWorkspace.projects;
     initialStoryProject = loadedWorkspace.activeProject;
+    if (initialStoryProjectId) {
+      const checkpoint = findLatestIncompleteStoryTaskCheckpoint(cwd, initialStoryProjectId);
+      if (checkpoint) {
+        initialRecoveryNotice =
+          `Incomplete story task found (${checkpoint.completedStages.length}/${checkpoint.totalStages}, ` +
+          `${checkpoint.status}). Run /resume or /retry.`;
+      }
+    }
   } catch (error) {
     initialStoryLoadError =
       error instanceof Error
@@ -218,8 +282,8 @@ export function App({
       initialStoryProjects
     );
 
-    return initialStoryLoadError
-      ? setTransientNotice(initialState, initialStoryLoadError)
+    return initialStoryLoadError || initialRecoveryNotice
+      ? setTransientNotice(initialState, initialStoryLoadError ?? initialRecoveryNotice ?? "")
       : initialState;
   });
   const stateRef = useRef(state);
@@ -229,6 +293,7 @@ export function App({
   const oauthSessionRef = useRef<ManagedOauthSession | null>(null);
   const oauthRunIdRef = useRef(0);
   const storyTaskRunIdRef = useRef(0);
+  const storyAbortControllerRef = useRef<AbortController | null>(null);
   const modelCacheRef = useRef<Map<string, readonly string[]>>(new Map());
   const modelFetchingRef = useRef<Set<string>>(new Set());
   const structuredRunner = structuredRunnerOverride ?? runStructuredPrompt;
@@ -1217,19 +1282,45 @@ export function App({
     runId: number,
     taskKind: "story-bootstrap" | "story-refresh",
     baseProject: StoryProject,
+    projectId: string | null,
     scope: "all" | "world" | "characters" | "timeline" | "outline",
-    model: string
+    model: string,
+    resumeTaskId?: string
   ): Promise<void> => {
     await Promise.resolve();
     let result: StoryTaskResult;
+    const abortController = new AbortController();
+    storyAbortControllerRef.current = abortController;
 
     try {
       result = await runStoryTask({
         cwd,
+        projectId,
         model,
         project: baseProject,
         runner: structuredRunner,
         scope,
+        taskId: resumeTaskId,
+        resume: Boolean(resumeTaskId),
+        abortSignal: abortController.signal,
+        onCheckpoint: (checkpoint) => {
+          if (storyTaskRunIdRef.current !== runId) {
+            return;
+          }
+          applyStateUpdate((activeState) => ({
+            ...activeState,
+            pendingTask: {
+              kind: taskKind,
+              stage: checkpoint.currentStage,
+              taskId: checkpoint.id,
+              stageIndex: checkpoint.stageIndex,
+              totalStages: checkpoint.totalStages,
+              startedAt: new Date(checkpoint.startedAt).getTime(),
+              retryCount: checkpoint.retryCount,
+              checkpointPath: checkpoint.checkpointPath
+            }
+          }));
+        },
         onStageStart: ({ project, view, message }) => {
           if (storyTaskRunIdRef.current !== runId) {
             return;
@@ -1286,7 +1377,14 @@ export function App({
           "Story task failed."
         )
       );
+      if (storyAbortControllerRef.current === abortController) {
+        storyAbortControllerRef.current = null;
+      }
       return;
+    }
+
+    if (storyAbortControllerRef.current === abortController) {
+      storyAbortControllerRef.current = null;
     }
 
     if (storyTaskRunIdRef.current !== runId) {
@@ -1302,18 +1400,24 @@ export function App({
             : scope;
       const successMessage =
         taskKind === "story-bootstrap"
-          ? "Story tables are ready."
+          ? "Story tables are ready. Next: /commit --chapter ch01"
           : scope === "all"
             ? "Story tables refreshed."
             : `Refreshed ${finalView}.`;
       const failureMessage = result.failedStage
         ? `${getStoryStageLabel(result.failedStage)} failed. Existing sections were kept.`
         : "Story task failed.";
+      const checkpointHint = result.taskCheckpoint
+        ? ` Completed ${result.taskCheckpoint.completedStages.length}/${result.taskCheckpoint.totalStages}. Run /retry or /resume. Checkpoint: ${result.taskCheckpoint.checkpointPath}`
+        : " Run /retry or /resume.";
+      const validationHint = result.validationReport
+        ? ` Validation: ${result.validationReport.passed ? "pass" : "fail"} (${result.validationReport.issues.length} issue(s)).`
+        : "";
       const transcriptMessage = result.ok
-        ? successMessage
+        ? `${successMessage}${validationHint}`
         : result.errorMessage
-          ? `${failureMessage} ${result.errorMessage}`
-          : failureMessage;
+          ? `${failureMessage} ${result.errorMessage}${checkpointHint}`
+          : `${failureMessage}${checkpointHint}`;
       const transcriptResponse = buildStoryTranscriptResponse(
         result.project,
         finalView,
@@ -1367,6 +1471,10 @@ export function App({
     },
     model: string
   ): Promise<void> => {
+    await Promise.resolve();
+    const abortController = new AbortController();
+    storyAbortControllerRef.current = abortController;
+
     try {
       const result = await commitStoryEvent({
         cwd,
@@ -1376,7 +1484,8 @@ export function App({
         eventText: command.eventText,
         patchFilePath: command.patchFilePath,
         force: command.force,
-        runner: structuredRunner
+        runner: structuredRunner,
+        abortSignal: abortController.signal
       });
 
       if (storyTaskRunIdRef.current !== runId) {
@@ -1411,7 +1520,7 @@ export function App({
           "world",
           saveError
             ? `${result.message} Saved for this run, but story persistence failed: ${saveError}`
-            : `${result.message} ${formatCiReportSummary(result.project)}`,
+            : `${result.message} ${formatCiReportSummary(result.project)} Next: /render ${command.chapterId}`,
           activeState.storyProjectId,
           syncStoryProjectList(activeState.storyProjects, activeState.storyProjectId, result.project)
         );
@@ -1459,6 +1568,10 @@ export function App({
           "Story commit failed."
         )
       );
+    } finally {
+      if (storyAbortControllerRef.current === abortController) {
+        storyAbortControllerRef.current = null;
+      }
     }
   };
 
@@ -1539,6 +1652,7 @@ export function App({
   const runStoryRenderCommand = async (
     runId: number,
     baseProject: StoryProject,
+    projectId: string | null,
     command: {
       chapterIds: string[];
       force: boolean;
@@ -1546,15 +1660,22 @@ export function App({
     },
     model: string
   ): Promise<void> => {
+    await Promise.resolve();
+    const abortController = new AbortController();
+    storyAbortControllerRef.current = abortController;
+
     try {
       const result = await renderStoryChapters({
         cwd,
+        projectId,
         model,
         project: baseProject,
         chapterIds: command.chapterIds,
         style: command.style,
         force: command.force,
-        runner: structuredRunner
+        validateOutput: true,
+        runner: structuredRunner,
+        abortSignal: abortController.signal
       });
 
       if (storyTaskRunIdRef.current !== runId) {
@@ -1565,12 +1686,15 @@ export function App({
         const saveError = saveStoryProject(cwd, result.project, activeState.storyProjectId);
         const renderedLabel = result.rendered.length > 0 ? result.rendered.join(", ") : "none";
         const skippedLabel = result.skipped.length > 0 ? result.skipped.join(", ") : "none";
+        const errorLabel = result.errors.length > 0
+          ? result.errors.map((entry) => `${entry.chapterId}: ${entry.message}`).join("; ")
+          : "none";
         const response = buildStoryTranscriptResponse(
           result.project,
           activeState.activeStoryView ?? "world",
           saveError
-            ? `Render finished (rendered: ${renderedLabel}; skipped: ${skippedLabel}). Persistence failed: ${saveError}`
-            : `Render finished (rendered: ${renderedLabel}; skipped: ${skippedLabel}).`,
+            ? `Render finished (rendered: ${renderedLabel}; skipped: ${skippedLabel}; errors: ${errorLabel}). Persistence failed: ${saveError}`
+            : `Render finished (rendered: ${renderedLabel}; skipped: ${skippedLabel}; errors: ${errorLabel}). Next: /compile all`,
           activeState.storyProjectId,
           syncStoryProjectList(activeState.storyProjects, activeState.storyProjectId, result.project)
         );
@@ -1593,7 +1717,7 @@ export function App({
             ),
             pendingTask: null
           },
-          "Render completed."
+          result.errors.length > 0 ? "Render completed with errors." : "Render completed."
         );
       });
     } catch (error) {
@@ -1617,20 +1741,30 @@ export function App({
           "Render failed."
         )
       );
+    } finally {
+      if (storyAbortControllerRef.current === abortController) {
+        storyAbortControllerRef.current = null;
+      }
     }
   };
 
   const runStoryCompileCommand = async (
     runId: number,
     baseProject: StoryProject,
+    projectId: string | null,
     command: {
       chapterIds: string[];
       outputPath: string | null;
     }
   ): Promise<void> => {
+    // Let the caller commit the pending state before this synchronous command
+    // publishes its completion state.
+    await Promise.resolve();
+
     try {
       const result = compileStoryChapters({
         cwd,
+        projectId,
         project: baseProject,
         chapterIds: command.chapterIds,
         outputPath: command.outputPath
@@ -1645,14 +1779,14 @@ export function App({
           {
             ...updateLatestTranscriptEntry(activeState, (entry) => ({
               ...entry,
-              response: `Compiled chapters: ${result.compiledChapters.join(", ") || "none"}\nMissing chapters: ${result.missingChapters.join(", ") || "none"}\nOutput: ${path.relative(cwd, result.outputPath) || result.outputPath}`,
-              rawResponse: `Compiled chapters: ${result.compiledChapters.join(", ") || "none"}\nMissing chapters: ${result.missingChapters.join(", ") || "none"}\nOutput: ${path.relative(cwd, result.outputPath) || result.outputPath}`,
-              failed: false,
+              response: `Compiled chapters: ${result.compiledChapters.join(", ") || "none"}\nMissing chapters: ${result.missingChapters.join(", ") || "none"}\nOutput: ${path.relative(cwd, result.outputPath) || result.outputPath}\nNext: /validate all`,
+              rawResponse: `Compiled chapters: ${result.compiledChapters.join(", ") || "none"}\nMissing chapters: ${result.missingChapters.join(", ") || "none"}\nOutput: ${path.relative(cwd, result.outputPath) || result.outputPath}\nNext: /validate all`,
+              failed: !result.wroteOutput,
               streaming: false
             })),
             pendingTask: null
           },
-          "Compile completed."
+          result.wroteOutput ? "Compile completed." : "Compile failed: no chapters found."
         )
       );
     } catch (error) {
@@ -1679,6 +1813,151 @@ export function App({
     }
   };
 
+  const runStoryValidateCommand = async (
+    runId: number,
+    baseProject: StoryProject,
+    projectId: string,
+    command: {
+      chapterIds: string[];
+      repair: boolean;
+    },
+    model: string | null
+  ): Promise<void> => {
+    await Promise.resolve();
+    const abortController = new AbortController();
+    storyAbortControllerRef.current = abortController;
+
+    try {
+      let nextProject = baseProject;
+      const chapterTexts: Record<string, string> = {};
+      const artifactPaths = getStoryArtifactPaths(cwd, projectId);
+      for (const chapterId of command.chapterIds) {
+        const chapterPath = path.join(artifactPaths.chapters, `${chapterId}.md`);
+        if (fs.existsSync(chapterPath)) {
+          chapterTexts[chapterId] = fs.readFileSync(chapterPath, "utf8");
+        }
+      }
+
+      let repairedTargets: string[] = [];
+      let repairAttempts = 0;
+      if (command.repair) {
+        if (!model) {
+          throw new Error("Select a model before using --repair.");
+        }
+        const gate = await runStoryValidationRepairGate(nextProject, {
+          cwd,
+          model,
+          runner: structuredRunner,
+          chapterTexts,
+          abortSignal: abortController.signal,
+          onTargetRepaired: ({ project }) => {
+            nextProject = project;
+            const error = saveStoryProject(cwd, nextProject, projectId);
+            if (error) {
+              throw new Error(`Could not persist repaired target: ${error}`);
+            }
+          }
+        });
+        nextProject = gate.project;
+        repairedTargets = gate.repairedTargets;
+        repairAttempts += gate.repairAttempts;
+
+        for (const [chapterId, text] of Object.entries(chapterTexts)) {
+          const chapterGate = await runChapterValidationRepairGate({
+            cwd,
+            model,
+            project: nextProject,
+            chapterId,
+            text,
+            runner: structuredRunner,
+            abortSignal: abortController.signal
+          });
+          repairAttempts += chapterGate.repairAttempts;
+          if (chapterGate.repairAttempts > 0) {
+            chapterTexts[chapterId] = chapterGate.text;
+            fs.writeFileSync(
+              path.join(artifactPaths.chapters, `${chapterId}.md`),
+              chapterGate.text.endsWith("\n") ? chapterGate.text : `${chapterGate.text}\n`,
+              "utf8"
+            );
+            repairedTargets.push(`chapter:${chapterId}`);
+          }
+        }
+      }
+
+      const report = validateStoryProject(nextProject, { chapterTexts });
+      const reportPath = writeStoryArtifactJson(cwd, projectId, "logs", "validation-report.json", {
+        report,
+        repairedTargets,
+        repairAttempts
+      });
+      const saveError = saveStoryProject(cwd, nextProject, projectId);
+      if (storyTaskRunIdRef.current !== runId) {
+        return;
+      }
+      const categoryCounts = [...new Set(report.issues.map((issue) => issue.category))]
+        .map((category) =>
+          `${category}:${report.issues.filter((issue) => issue.category === category).length}`
+        )
+        .join(", ");
+      const response = [
+        `Validation ${report.passed ? "passed" : "failed"}: ${report.issues.length} issue(s).`,
+        categoryCounts ? `Issues: ${categoryCounts}` : "All schema, chapter, fact, word-count, character, and foreshadow checks passed.",
+        command.repair
+          ? `Repair attempts: ${repairAttempts}; repaired: ${repairedTargets.join(", ") || "none"}.`
+          : "Run /validate all --repair to repair only failed sections.",
+        `Report: ${path.relative(cwd, reportPath)}`,
+        saveError ? `Project persistence warning: ${saveError}` : ""
+      ].filter(Boolean).join("\n");
+
+      applyStateUpdate((activeState) =>
+        setTransientNotice(
+          {
+            ...updateLatestTranscriptEntry(activeState, (entry) => ({
+              ...entry,
+              response,
+              rawResponse: response,
+              failed: !report.passed,
+              streaming: false
+            })),
+            storyProject: nextProject,
+            storyProjects: syncStoryProjectList(
+              activeState.storyProjects,
+              activeState.storyProjectId,
+              nextProject
+            ),
+            pendingTask: null
+          },
+          report.passed ? "Validation passed." : "Validation found unresolved issues."
+        )
+      );
+    } catch (error) {
+      if (storyTaskRunIdRef.current !== runId) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      applyStateUpdate((activeState) =>
+        setTransientNotice(
+          {
+            ...updateLatestTranscriptEntry(activeState, (entry) => ({
+              ...entry,
+              response: `Validation failed. ${message}`,
+              rawResponse: `Validation failed. ${message}`,
+              failed: true,
+              streaming: false
+            })),
+            pendingTask: null
+          },
+          "Validation failed."
+        )
+      );
+    } finally {
+      if (storyAbortControllerRef.current === abortController) {
+        storyAbortControllerRef.current = null;
+      }
+    }
+  };
+
   const handlePlainPromptSubmit = (currentState: AppState, now: number): AppState => {
     const prompt = currentState.inputValue.trim();
 
@@ -1690,7 +1969,7 @@ export function App({
     const currentModel = currentState.config.model;
 
     if (!currentConnection) {
-      return setTransientNotice(clearInputValue(currentState), "Run /connect first.", now);
+      return setTransientNotice(currentState, "Run /connect first. Your draft was preserved.", now);
     }
 
     if (!currentModel) {
@@ -1780,7 +2059,14 @@ export function App({
         pendingEntry
       );
 
-      void runStoryPipeline(storyRunId, "story-bootstrap", seededProject, "all", currentModel);
+      void runStoryPipeline(
+        storyRunId,
+        "story-bootstrap",
+        seededProject,
+        currentState.storyProjectId,
+        "all",
+        currentModel
+      );
       return initialState;
     }
 
@@ -1990,9 +2276,14 @@ export function App({
 
       if (storyResult.type === "create") {
         if (storyResult.dir) {
-          const resolvedDir = path.isAbsolute(storyResult.dir)
-            ? storyResult.dir
-            : path.resolve(cwd, storyResult.dir);
+          const expandedDir = storyResult.dir === "~"
+            ? os.homedir()
+            : storyResult.dir.startsWith("~/")
+              ? path.join(os.homedir(), storyResult.dir.slice(2))
+              : storyResult.dir;
+          const resolvedDir = path.isAbsolute(expandedDir)
+            ? expandedDir
+            : path.resolve(cwd, expandedDir);
 
           try {
             fs.mkdirSync(resolvedDir, { recursive: true });
@@ -2198,7 +2489,16 @@ export function App({
           {
             chapterId: storyResult.chapterId,
             eventText: storyResult.eventText,
-            patchFilePath: storyResult.patchFilePath,
+            patchFilePath: storyResult.patchFilePath
+              ? path.resolve(
+                  cwd,
+                  storyResult.patchFilePath === "~"
+                    ? os.homedir()
+                    : storyResult.patchFilePath.startsWith("~/")
+                      ? path.join(os.homedir(), storyResult.patchFilePath.slice(2))
+                      : storyResult.patchFilePath
+                )
+              : null,
             force: storyResult.force
           },
           modelForCommit
@@ -2333,6 +2633,7 @@ export function App({
         void runStoryRenderCommand(
           storyRunId,
           storyProject,
+          currentState.storyProjectId,
           {
             chapterIds: storyResult.chapterIds,
             force: storyResult.force,
@@ -2388,10 +2689,95 @@ export function App({
           pendingEntry
         );
 
-        void runStoryCompileCommand(storyRunId, storyProject, {
+        void runStoryCompileCommand(storyRunId, storyProject, currentState.storyProjectId, {
           chapterIds: storyResult.chapterIds,
           outputPath: storyResult.outputPath
         });
+
+        return {
+          nextState,
+          shouldExit: false
+        };
+      }
+
+      if (storyResult.type === "validate") {
+        const storyProject = currentState.storyProject;
+        const projectId = currentState.storyProjectId;
+        if (!storyProject || !projectId) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "Run /init first to create a story project.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+        if (storyResult.repair) {
+          if (!currentState.config.connection) {
+            return {
+              nextState: setTransientNotice(clearInputValue(currentState), "Run /connect first.", now),
+              shouldExit: false
+            };
+          }
+          if (!currentState.config.model) {
+            return {
+              nextState: setTransientNotice(clearInputValue(currentState), "Run /models first.", now),
+              shouldExit: false
+            };
+          }
+          const syncError = primeConnectionForRun(currentState.config.connection);
+          if (syncError) {
+            return {
+              nextState: setTransientNotice(
+                clearInputValue(currentState),
+                `Credential sync failed before repair: ${syncError}`,
+                now
+              ),
+              shouldExit: false
+            };
+          }
+        }
+
+        const storyRunId = storyTaskRunIdRef.current + 1;
+        storyTaskRunIdRef.current = storyRunId;
+        const pendingEntry: TranscriptEntry = {
+          id: `story-validate-${Date.now()}-${storyRunId}`,
+          prompt: commandPrompt,
+          response: storyResult.message,
+          provider: currentState.config.connection?.provider ?? "storyforge",
+          model: storyResult.repair
+            ? currentState.config.model ?? "story/validate"
+            : "story/validate",
+          failed: false,
+          rawResponse: storyResult.message,
+          streaming: false
+        };
+        const nextState = appendTranscriptEntry(
+          setTransientNotice(
+            {
+              ...clearInputValue(currentState),
+              pendingTask: {
+                kind: "story-validate",
+                stage: storyResult.repair ? "repair" : "check"
+              }
+            },
+            storyResult.message,
+            now
+          ),
+          pendingEntry
+        );
+
+        void runStoryValidateCommand(
+          storyRunId,
+          storyProject,
+          projectId,
+          {
+            chapterIds: storyResult.chapterIds,
+            repair: storyResult.repair
+          },
+          currentState.config.model
+        );
 
         return {
           nextState,
@@ -2481,6 +2867,7 @@ export function App({
         storyRunId,
         "story-refresh",
         storyProject,
+        currentState.storyProjectId,
         storyResult.scope,
         currentModel
       );
@@ -2492,6 +2879,120 @@ export function App({
     }
 
     switch (parsedCommand.command) {
+      case "/cancel":
+        if (!currentState.pendingTask || !storyAbortControllerRef.current) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "No cancellable story task is running.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+        storyAbortControllerRef.current.abort("Cancelled by user.");
+        return {
+          nextState: setTransientNotice(
+            clearInputValue(currentState),
+            "Cancellation requested; checkpoint preserved.",
+            now
+          ),
+          shouldExit: false
+        };
+
+      case "/retry":
+      case "/resume": {
+        if (currentState.pendingTask) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "Cancel or wait for the current task first.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+        if (!currentState.storyProject || !currentState.storyProjectId || !currentState.config.model) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "A project and model are required to resume.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+        let checkpoint;
+        try {
+          checkpoint = findLatestIncompleteStoryTaskCheckpoint(cwd, currentState.storyProjectId);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              `Checkpoint recovery stopped safely. ${message}`,
+              now
+            ),
+            shouldExit: false
+          };
+        }
+        if (!checkpoint) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "No incomplete checkpoint was found.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+        const scope = checkpoint.scope as "all" | "world" | "characters" | "timeline" | "outline";
+        const storyRunId = storyTaskRunIdRef.current + 1;
+        storyTaskRunIdRef.current = storyRunId;
+        const taskKind = checkpoint.kind === "story-refresh"
+          ? "story-refresh"
+          : "story-bootstrap";
+        const pendingEntry: TranscriptEntry = {
+          id: `story-resume-${Date.now()}-${storyRunId}`,
+          prompt: parsedCommand.command,
+          response: `Resuming checkpoint ${checkpoint.id}...`,
+          provider: currentState.config.connection?.provider ?? "storyforge",
+          model: currentState.config.model,
+          failed: false,
+          streaming: false
+        };
+
+        void runStoryPipeline(
+          storyRunId,
+          taskKind,
+          currentState.storyProject,
+          currentState.storyProjectId,
+          scope,
+          currentState.config.model,
+          checkpoint.id
+        );
+
+        return {
+          nextState: appendTranscriptEntry(
+            {
+              ...clearInputValue(currentState),
+              pendingTask: {
+                kind: taskKind,
+                stage: checkpoint.currentStage,
+                taskId: checkpoint.id,
+                stageIndex: checkpoint.stageIndex,
+                totalStages: checkpoint.totalStages,
+                startedAt: new Date(checkpoint.startedAt).getTime(),
+                retryCount: checkpoint.retryCount,
+                checkpointPath: checkpoint.checkpointPath
+              }
+            },
+            pendingEntry
+          ),
+          shouldExit: false
+        };
+      }
+
       case "/connect":
         if (parsedCommand.args.length === 0) {
           return {
@@ -2530,33 +3031,14 @@ export function App({
           }
         }
 
-        if (parsedCommand.args.length < 2) {
-          return {
-            nextState: setTransientNotice(clearInputValue(currentState), "Usage: /connect <provider> <api-key> [base-url]", now),
-            shouldExit: false
-          };
-        }
-
-        {
-          const [providerRaw, apiKey, ...baseUrlParts] = parsedCommand.args;
-          const provider = providerRaw.toLowerCase();
-          const nextState = connectWithSession(
-            currentState,
-            {
-              provider,
-              authMode: "api",
-              apiKey,
-              baseUrl: baseUrlParts.length > 0 ? baseUrlParts.join(" ").trim() || null : null,
-              authLabel: "Saved in .storyforge"
-            },
+        return {
+          nextState: setTransientNotice(
+            clearInputValue(currentState),
+            "API keys are not accepted in commands. Run /connect <provider> and use the protected credential dialog.",
             now
-          );
-
-          return {
-            nextState,
-            shouldExit: false
-          };
-        }
+          ),
+          shouldExit: false
+        };
       case "/model":
       case "/models":
         if (parsedCommand.args.length === 0) {
@@ -3241,6 +3723,27 @@ export function App({
             expiresAt: Date.now() + 2_500
           }
         });
+        return;
+      }
+
+      if (
+        key.return &&
+        parseCommandInput(currentState.inputValue)?.command === "/cancel"
+      ) {
+        const submission = handleCommandSubmit(currentState, Date.now());
+        commitState(submission.nextState);
+        return;
+      }
+
+      if (key.escape && storyAbortControllerRef.current) {
+        storyAbortControllerRef.current.abort("Cancelled by user.");
+        commitState(
+          setTransientNotice(
+            currentState,
+            "Cancellation requested; checkpoint preserved.",
+            Date.now()
+          )
+        );
         return;
       }
 
