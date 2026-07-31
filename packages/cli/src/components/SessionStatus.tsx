@@ -44,14 +44,6 @@ function truncateEnd(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength - 3)}...`;
 }
 
-function maskApiKey(apiKey: string): string {
-  if (apiKey.length <= 8) {
-    return "*".repeat(apiKey.length);
-  }
-
-  return `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`;
-}
-
 function getAuthStatus(config: SessionConfig): string {
   if (!config.connection) {
     return "waiting for credentials";
@@ -62,7 +54,7 @@ function getAuthStatus(config: SessionConfig): string {
   }
 
   if (config.connection.apiKey) {
-    return maskApiKey(config.connection.apiKey);
+    return "API key saved";
   }
 
   return config.connection.authLabel ?? "Saved in .storyforge";

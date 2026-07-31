@@ -144,13 +144,7 @@ function charPosToOffset(str: string, charPos: number): number {
 }
 
 function charCount(str: string): number {
-  let count = 0;
-
-  for (const _char of str) {
-    count += 1;
-  }
-
-  return count;
+  return [...str].length;
 }
 
 export function appendInputCharacter(state: AppState, input: string): AppState {

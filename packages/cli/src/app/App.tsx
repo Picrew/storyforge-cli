@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import React, { useEffect, useRef, useState } from "react";
 import { useApp, useInput, useStdout } from "ink";
@@ -165,7 +166,51 @@ function parseCommandInput(inputValue: string): { command: string; args: string[
     return null;
   }
 
-  const [command, ...args] = rawInput.split(/\s+/);
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  for (const character of rawInput) {
+    if (escaped) {
+      current += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+      } else {
+        current += character;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += character;
+  }
+
+  if (escaped) {
+    current += "\\";
+  }
+  if (current) {
+    tokens.push(current);
+  }
+
+  const [command = "", ...args] = tokens;
 
   return {
     command: command.toLowerCase(),
@@ -1217,6 +1262,7 @@ export function App({
     runId: number,
     taskKind: "story-bootstrap" | "story-refresh",
     baseProject: StoryProject,
+    projectId: string | null,
     scope: "all" | "world" | "characters" | "timeline" | "outline",
     model: string
   ): Promise<void> => {
@@ -1226,6 +1272,7 @@ export function App({
     try {
       result = await runStoryTask({
         cwd,
+        projectId,
         model,
         project: baseProject,
         runner: structuredRunner,
@@ -1539,6 +1586,7 @@ export function App({
   const runStoryRenderCommand = async (
     runId: number,
     baseProject: StoryProject,
+    projectId: string | null,
     command: {
       chapterIds: string[];
       force: boolean;
@@ -1549,6 +1597,7 @@ export function App({
     try {
       const result = await renderStoryChapters({
         cwd,
+        projectId,
         model,
         project: baseProject,
         chapterIds: command.chapterIds,
@@ -1565,12 +1614,15 @@ export function App({
         const saveError = saveStoryProject(cwd, result.project, activeState.storyProjectId);
         const renderedLabel = result.rendered.length > 0 ? result.rendered.join(", ") : "none";
         const skippedLabel = result.skipped.length > 0 ? result.skipped.join(", ") : "none";
+        const errorLabel = result.errors.length > 0
+          ? result.errors.map((entry) => `${entry.chapterId}: ${entry.message}`).join("; ")
+          : "none";
         const response = buildStoryTranscriptResponse(
           result.project,
           activeState.activeStoryView ?? "world",
           saveError
-            ? `Render finished (rendered: ${renderedLabel}; skipped: ${skippedLabel}). Persistence failed: ${saveError}`
-            : `Render finished (rendered: ${renderedLabel}; skipped: ${skippedLabel}).`,
+            ? `Render finished (rendered: ${renderedLabel}; skipped: ${skippedLabel}; errors: ${errorLabel}). Persistence failed: ${saveError}`
+            : `Render finished (rendered: ${renderedLabel}; skipped: ${skippedLabel}; errors: ${errorLabel}).`,
           activeState.storyProjectId,
           syncStoryProjectList(activeState.storyProjects, activeState.storyProjectId, result.project)
         );
@@ -1593,7 +1645,7 @@ export function App({
             ),
             pendingTask: null
           },
-          "Render completed."
+          result.errors.length > 0 ? "Render completed with errors." : "Render completed."
         );
       });
     } catch (error) {
@@ -1623,6 +1675,7 @@ export function App({
   const runStoryCompileCommand = async (
     runId: number,
     baseProject: StoryProject,
+    projectId: string | null,
     command: {
       chapterIds: string[];
       outputPath: string | null;
@@ -1631,6 +1684,7 @@ export function App({
     try {
       const result = compileStoryChapters({
         cwd,
+        projectId,
         project: baseProject,
         chapterIds: command.chapterIds,
         outputPath: command.outputPath
@@ -1647,12 +1701,12 @@ export function App({
               ...entry,
               response: `Compiled chapters: ${result.compiledChapters.join(", ") || "none"}\nMissing chapters: ${result.missingChapters.join(", ") || "none"}\nOutput: ${path.relative(cwd, result.outputPath) || result.outputPath}`,
               rawResponse: `Compiled chapters: ${result.compiledChapters.join(", ") || "none"}\nMissing chapters: ${result.missingChapters.join(", ") || "none"}\nOutput: ${path.relative(cwd, result.outputPath) || result.outputPath}`,
-              failed: false,
+              failed: !result.wroteOutput,
               streaming: false
             })),
             pendingTask: null
           },
-          "Compile completed."
+          result.wroteOutput ? "Compile completed." : "Compile failed: no chapters found."
         )
       );
     } catch (error) {
@@ -1690,7 +1744,7 @@ export function App({
     const currentModel = currentState.config.model;
 
     if (!currentConnection) {
-      return setTransientNotice(clearInputValue(currentState), "Run /connect first.", now);
+      return setTransientNotice(currentState, "Run /connect first. Your draft was preserved.", now);
     }
 
     if (!currentModel) {
@@ -1780,7 +1834,14 @@ export function App({
         pendingEntry
       );
 
-      void runStoryPipeline(storyRunId, "story-bootstrap", seededProject, "all", currentModel);
+      void runStoryPipeline(
+        storyRunId,
+        "story-bootstrap",
+        seededProject,
+        currentState.storyProjectId,
+        "all",
+        currentModel
+      );
       return initialState;
     }
 
@@ -1990,9 +2051,14 @@ export function App({
 
       if (storyResult.type === "create") {
         if (storyResult.dir) {
-          const resolvedDir = path.isAbsolute(storyResult.dir)
-            ? storyResult.dir
-            : path.resolve(cwd, storyResult.dir);
+          const expandedDir = storyResult.dir === "~"
+            ? os.homedir()
+            : storyResult.dir.startsWith("~/")
+              ? path.join(os.homedir(), storyResult.dir.slice(2))
+              : storyResult.dir;
+          const resolvedDir = path.isAbsolute(expandedDir)
+            ? expandedDir
+            : path.resolve(cwd, expandedDir);
 
           try {
             fs.mkdirSync(resolvedDir, { recursive: true });
@@ -2198,7 +2264,16 @@ export function App({
           {
             chapterId: storyResult.chapterId,
             eventText: storyResult.eventText,
-            patchFilePath: storyResult.patchFilePath,
+            patchFilePath: storyResult.patchFilePath
+              ? path.resolve(
+                  cwd,
+                  storyResult.patchFilePath === "~"
+                    ? os.homedir()
+                    : storyResult.patchFilePath.startsWith("~/")
+                      ? path.join(os.homedir(), storyResult.patchFilePath.slice(2))
+                      : storyResult.patchFilePath
+                )
+              : null,
             force: storyResult.force
           },
           modelForCommit
@@ -2333,6 +2408,7 @@ export function App({
         void runStoryRenderCommand(
           storyRunId,
           storyProject,
+          currentState.storyProjectId,
           {
             chapterIds: storyResult.chapterIds,
             force: storyResult.force,
@@ -2388,7 +2464,7 @@ export function App({
           pendingEntry
         );
 
-        void runStoryCompileCommand(storyRunId, storyProject, {
+        void runStoryCompileCommand(storyRunId, storyProject, currentState.storyProjectId, {
           chapterIds: storyResult.chapterIds,
           outputPath: storyResult.outputPath
         });
@@ -2481,6 +2557,7 @@ export function App({
         storyRunId,
         "story-refresh",
         storyProject,
+        currentState.storyProjectId,
         storyResult.scope,
         currentModel
       );
@@ -2530,33 +2607,14 @@ export function App({
           }
         }
 
-        if (parsedCommand.args.length < 2) {
-          return {
-            nextState: setTransientNotice(clearInputValue(currentState), "Usage: /connect <provider> <api-key> [base-url]", now),
-            shouldExit: false
-          };
-        }
-
-        {
-          const [providerRaw, apiKey, ...baseUrlParts] = parsedCommand.args;
-          const provider = providerRaw.toLowerCase();
-          const nextState = connectWithSession(
-            currentState,
-            {
-              provider,
-              authMode: "api",
-              apiKey,
-              baseUrl: baseUrlParts.length > 0 ? baseUrlParts.join(" ").trim() || null : null,
-              authLabel: "Saved in .storyforge"
-            },
+        return {
+          nextState: setTransientNotice(
+            clearInputValue(currentState),
+            "API keys are not accepted in commands. Run /connect <provider> and use the protected credential dialog.",
             now
-          );
-
-          return {
-            nextState,
-            shouldExit: false
-          };
-        }
+          ),
+          shouldExit: false
+        };
       case "/model":
       case "/models":
         if (parsedCommand.args.length === 0) {

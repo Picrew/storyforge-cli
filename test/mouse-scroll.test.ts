@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 // Test the SGR mouse event parsing logic directly
-const SGR_MOUSE_RE = /\x1b\[<(\d+);\d+;\d+[Mm]/g;
+const SGR_MOUSE_RE = new RegExp(`${String.fromCharCode(27)}\\[<(\\d+);\\d+;\\d+[Mm]`, "g");
 const SCROLL_UP_BUTTON = 64;
 const SCROLL_DOWN_BUTTON = 65;
 

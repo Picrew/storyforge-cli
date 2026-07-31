@@ -9,6 +9,7 @@ packages/*/dist/
 generated-novels/
 installers/
 .release-tmp/
+report.md
 
 .env
 .env.*

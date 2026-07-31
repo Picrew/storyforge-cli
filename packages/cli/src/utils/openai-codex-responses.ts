@@ -240,7 +240,7 @@ async function readCodexSseStream(
       return;
     }
 
-    let payload: unknown = null;
+    let payload: unknown;
 
     try {
       payload = JSON.parse(trimmed);
@@ -398,11 +398,10 @@ export async function streamOpenAICodexResponse(options: OpenAICodexStreamOption
 
   // Build the base input (chat history + current prompt)
   const baseInput: unknown[] = buildCodexRequestMessages(effectivePrompt, options.history);
-  let currentInput = [...baseInput];
+  const currentInput = [...baseInput];
   let toolRoundsLeft = 3;
   let totalOutput = "";
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const includeTools = tavilyApiKey && toolRoundsLeft > 0;
 

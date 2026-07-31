@@ -84,6 +84,7 @@ const providerCatalog: readonly ProviderOption[] = [
     credentialLabel: "API key",
     credentialHelperText: "Enter saves to .storyforge and opens model picker.",
     fallbackModels: [
+      { id: "deepseek/deepseek-v4-flash", title: "deepseek-v4-flash", subtitle: "Fast V4 model" },
       { id: "deepseek/deepseek-reasoner", title: "deepseek-reasoner", subtitle: "Reasoning default" },
       { id: "deepseek/deepseek-chat", title: "deepseek-chat", subtitle: "Fast chat model" }
     ]

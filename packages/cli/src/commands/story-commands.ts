@@ -571,10 +571,28 @@ export function handleStoryCommand(
   parsedCommand: ParsedCommand
 ): StoryCommandResult {
   switch (parsedCommand.command) {
+    case "/help":
+      return {
+        type: "notice",
+        message: [
+          "Core: /connect, /models, /status, /projects",
+          "Story: /init, /world, /char, /timeline, /outline",
+          "Pipeline: /commit, /ci, /render, /compile",
+          "Use quoted paths when they contain spaces, e.g. /init --dir \"My Story\"."
+        ].join("\n")
+      };
+
     case "/init": {
       const initParsed = parseCommandFlags(parsedCommand.args);
       const initDir = initParsed.valueFlags.get("dir")?.trim() || undefined;
       const initPositional = initParsed.positional;
+
+      if (initParsed.booleanFlags.has("dir")) {
+        return {
+          type: "notice",
+          message: "Missing value for --dir. Usage: /init --dir <path>"
+        };
+      }
 
       if (initPositional.length === 0) {
         const nextProject = createBlankStoryProject(undefined, getUntitledTitle(context.projects));
@@ -981,6 +999,13 @@ export function handleStoryCommand(
       const patchFilePath = parsed.valueFlags.get("patch-file")?.trim() || null;
       const force = parsed.booleanFlags.has("force");
       const eventText = parsed.positional.join(" ").trim();
+
+      if (parsed.booleanFlags.has("patch-file")) {
+        return {
+          type: "notice",
+          message: "Missing value for --patch-file."
+        };
+      }
 
       if (!chapterId) {
         return {

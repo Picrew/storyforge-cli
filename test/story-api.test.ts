@@ -127,7 +127,7 @@ function fakeModelResponse(prompt: string): string {
         {
           label: "Confrontation",
           summary: "Han attempts to erase Lin's identity record.",
-          chapterRef: "ch03",
+          chapterRef: "ch02",
           stakes: "Identity loss",
           notes: "Reveal motive"
         }

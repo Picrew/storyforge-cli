@@ -51,6 +51,30 @@ function createWorkspaceRootPath(cwd: string): string {
   return path.join(cwd, STORY_ROOT_DIR);
 }
 
+function resolveWorkspaceRelativePath(cwd: string, relativeFile: string): string {
+  if (!relativeFile || path.isAbsolute(relativeFile)) {
+    throw new Error(`Invalid story project file path: ${relativeFile || "(empty)"}`);
+  }
+
+  const workspaceRoot = path.resolve(createWorkspaceRootPath(cwd));
+  const resolvedPath = path.resolve(workspaceRoot, relativeFile);
+
+  if (resolvedPath !== workspaceRoot && !resolvedPath.startsWith(`${workspaceRoot}${path.sep}`)) {
+    throw new Error(`Story project file escapes its workspace: ${relativeFile}`);
+  }
+
+  return resolvedPath;
+}
+
+function isSafeWorkspaceRelativePath(relativeFile: string): boolean {
+  if (!relativeFile || path.isAbsolute(relativeFile)) {
+    return false;
+  }
+
+  const normalized = path.normalize(relativeFile);
+  return normalized !== ".." && !normalized.startsWith(`..${path.sep}`);
+}
+
 function createWorkspaceFileData(
   activeProjectId: string | null,
   projects: readonly StoryLibraryEntry[]
@@ -107,7 +131,7 @@ function normalizeStoryLibraryEntry(value: unknown, index: number): StoryLibrary
   const id = asString(value.id, `project-${index + 1}`).trim();
   const file = asString(value.file).trim();
 
-  if (!id || !file) {
+  if (!id || !file || !isSafeWorkspaceRelativePath(file)) {
     return null;
   }
 
@@ -161,8 +185,10 @@ function resolveActiveProjectId(
   workspace: StoryWorkspaceFile,
   requestedProjectId?: string | null
 ): string | null {
-  if (requestedProjectId && workspace.projects.some((entry) => entry.id === requestedProjectId)) {
-    return requestedProjectId;
+  if (requestedProjectId) {
+    return workspace.projects.some((entry) => entry.id === requestedProjectId)
+      ? requestedProjectId
+      : null;
   }
 
   if (workspace.activeProjectId && workspace.projects.some((entry) => entry.id === workspace.activeProjectId)) {
@@ -263,7 +289,7 @@ export function getStoryProjectAbsolutePath(
     (projectId ? projects.find((entry) => entry.id === projectId)?.file : null) ??
     LEGACY_PROJECT_FILE;
 
-  return path.join(createWorkspaceRootPath(cwd), relativeFile);
+  return resolveWorkspaceRelativePath(cwd, relativeFile);
 }
 
 export function createBlankStoryProject(
@@ -553,7 +579,7 @@ export function loadStoryWorkspace(cwd: string): LoadedStoryWorkspace {
     activeProjectId: projectId,
     projects: workspace.projects,
     activeProject: projectEntry
-      ? readProjectFile(path.join(createWorkspaceRootPath(cwd), projectEntry.file))
+      ? readProjectFile(resolveWorkspaceRelativePath(cwd, projectEntry.file))
       : null
   };
 }
@@ -565,7 +591,7 @@ export function loadStoryProject(cwd: string, projectId?: string | null): StoryP
     return null;
   }
 
-  return readProjectFile(path.join(createWorkspaceRootPath(cwd), projectEntry.file));
+  return readProjectFile(resolveWorkspaceRelativePath(cwd, projectEntry.file));
 }
 
 export function createStoryProject(cwd: string, project: StoryProject): {
@@ -576,7 +602,7 @@ export function createStoryProject(cwd: string, project: StoryProject): {
   const { workspace } = createActiveProjectSelection(cwd);
   const projectId = randomUUID();
   const projectFile = path.join(PROJECTS_DIR, `${projectId}.json`);
-  const projectPath = path.join(createWorkspaceRootPath(cwd), projectFile);
+  const projectPath = resolveWorkspaceRelativePath(cwd, projectFile);
   const entry = createStoryLibraryEntry(projectId, projectFile, project);
   const nextProjects = [...workspace.projects, entry];
   const writeError = writeJsonFileAtomic(projectPath, project);
@@ -607,12 +633,17 @@ export function saveStoryProject(
     cwd,
     projectId
   );
+
+  if (projectId && workspace.projects.length > 0 && !projectEntry) {
+    return `Unknown story project: ${projectId}`;
+  }
+
   const resolvedProjectId = activeProjectId ?? projectId ?? LEGACY_PROJECT_ID;
   const resolvedFile = projectEntry?.file ??
     (resolvedProjectId !== LEGACY_PROJECT_ID
       ? path.join(PROJECTS_DIR, `${resolvedProjectId}.json`)
       : LEGACY_PROJECT_FILE);
-  const projectPath = path.join(createWorkspaceRootPath(cwd), resolvedFile);
+  const projectPath = resolveWorkspaceRelativePath(cwd, resolvedFile);
   const projectError = writeJsonFileAtomic(projectPath, project);
 
   if (projectError) {

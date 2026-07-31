@@ -69,8 +69,12 @@ function fetchModelsFromApiSync(
   try {
     const result = spawnSync(
       "curl",
-      ["-sS", "-H", `Authorization: Bearer ${apiKey}`, modelsUrl],
-      { encoding: "utf8", timeout: 10_000 }
+      ["-sS", "-H", "@-", modelsUrl],
+      {
+        encoding: "utf8",
+        timeout: 10_000,
+        input: `Authorization: Bearer ${apiKey}\n`
+      }
     );
 
     if (result.error || result.status !== 0) {
@@ -131,9 +135,10 @@ function fetchModelsFromApiAsync(
 
   const proc = spawn(
     "curl",
-    ["-sS", "-H", `Authorization: Bearer ${apiKey}`, modelsUrl],
-    { stdio: ["ignore", "pipe", "ignore"] }
+    ["-sS", "-H", "@-", modelsUrl],
+    { stdio: ["pipe", "pipe", "ignore"] }
   );
+  proc.stdin.end(`Authorization: Bearer ${apiKey}\n`);
 
   let output = "";
   const timeout = setTimeout(() => {
