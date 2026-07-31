@@ -176,6 +176,12 @@ export interface PendingTask {
     | "story-render"
     | "story-compile";
   stage: string | null;
+  taskId?: string;
+  stageIndex?: number;
+  totalStages?: number;
+  startedAt?: number;
+  retryCount?: number;
+  checkpointPath?: string;
 }
 
 export type StoryRefreshScope = "all" | "world" | "characters" | "timeline" | "outline";

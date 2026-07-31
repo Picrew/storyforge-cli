@@ -16,6 +16,10 @@ export interface CommandPreviewItem {
     | "characters"
     | "timeline"
     | "outline"
+    | "help"
+    | "cancel"
+    | "retry"
+    | "resume"
     | "clear"
     | "exit";
   aliases?: readonly string[];
@@ -93,6 +97,26 @@ const commandPreviewItems: readonly CommandPreviewItem[] = [
     command: "/outline",
     description: "Show or edit chapter plan",
     action: "outline"
+  },
+  {
+    command: "/help",
+    description: "Show command help",
+    action: "help"
+  },
+  {
+    command: "/cancel",
+    description: "Cancel running task and keep checkpoint",
+    action: "cancel"
+  },
+  {
+    command: "/retry",
+    description: "Retry latest failed checkpoint",
+    action: "retry"
+  },
+  {
+    command: "/resume",
+    description: "Resume latest incomplete checkpoint",
+    action: "resume"
   },
   {
     command: "/clear",

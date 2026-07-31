@@ -185,7 +185,11 @@ function fakeModelResponse(prompt: string): string {
     const match = /- Chapter id:\s*(ch\d{2})/i.exec(prompt);
     const chapterId = match?.[1] ?? "ch01";
 
-    return `# ${chapterId.toUpperCase()}\n\nRendered prose for ${chapterId}.`;
+    return `# ${chapterId.toUpperCase()}\n\n${`Rendered prose for ${chapterId} advances the story clearly. `.repeat(90)}`;
+  }
+
+  if (prompt.includes("Repair only the failed chapter draft.")) {
+    return "Repaired chapter prose advances the story clearly. ".repeat(90);
   }
 
   return "ok";

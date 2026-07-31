@@ -97,7 +97,14 @@ function extractResponseContent(payload: unknown): string {
     return "";
   }
 
-  return toTextFromContent((message as Record<string, unknown>).content);
+  const messageRecord = message as Record<string, unknown>;
+  const content = toTextFromContent(messageRecord.content);
+
+  if (content.trim()) {
+    return content;
+  }
+
+  return toTextFromContent(messageRecord.reasoning_content);
 }
 
 function getProviderErrorMessage(payload: unknown, status: number, providerId: string): string {
@@ -160,6 +167,7 @@ function buildExtraHeaders(providerId: string): Record<string, string> {
 async function runDirectStructuredPrompt(
   model: string,
   prompt: string,
+  stage: string,
   history?: readonly ChatMessage[],
   signal?: AbortSignal
 ): Promise<string> {
@@ -199,9 +207,15 @@ async function runDirectStructuredPrompt(
     { role: "user" as const, content: prompt.trim() }
   ];
 
+  const expectsJson = !stage.startsWith("render-") && !/^repair-ch\d+$/i.test(stage);
   const body = JSON.stringify({
     model: modelId,
-    messages
+    messages,
+    max_tokens: expectsJson ? 8_192 : 12_288,
+    temperature: 0.2,
+    ...(expectsJson && providerId === "deepseek"
+      ? { response_format: { type: "json_object" } }
+      : {})
   });
 
   let lastError: Error | null = null;
@@ -318,7 +332,13 @@ async function runDirectStructuredPrompt(
 export const runStructuredPrompt: StructuredRunner = async (
   options: StructuredRunOptions
 ): Promise<string> => {
-  return runDirectStructuredPrompt(options.model, options.prompt, options.history, options.signal);
+  return runDirectStructuredPrompt(
+    options.model,
+    options.prompt,
+    options.stage,
+    options.history,
+    options.signal
+  );
 };
 
 function stripCodeFences(value: string): string {

@@ -18,7 +18,11 @@ import {
   type ChapterRenderPromptContext,
   buildCommitPatchPrompt
 } from "./prompt-catalog.js";
-import { getStoryArtifactPaths } from "./artifact-store.js";
+import {
+  getStoryArtifactPaths,
+  migrateLegacyStoryArtifacts
+} from "./artifact-store.js";
+import { runChapterValidationRepairGate } from "./story-validation.js";
 import { parseStructuredJson, type StructuredRunner } from "./structured-run.js";
 import type { EventPatchOp, StoryCiReport, StoryProject } from "./types.js";
 
@@ -418,6 +422,8 @@ export interface RenderStoryChaptersOptions {
   force: boolean;
   runner: StructuredRunner;
   maxConcurrency?: number;
+  validateOutput?: boolean;
+  maxRepairAttempts?: number;
   abortSignal?: AbortSignal;
 }
 
@@ -623,6 +629,9 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
   const rendered: string[] = [];
   const skipped: string[] = [];
   const errors: RenderStoryChaptersResult["errors"] = [];
+  if (options.projectId) {
+    migrateLegacyStoryArtifacts(options.cwd, options.projectId, project);
+  }
   const chaptersDir = getStoryArtifactPaths(options.cwd, options.projectId).chapters;
   const maxConcurrency = normalizeConcurrency(options.maxConcurrency);
   const chaptersToRender: {
@@ -697,10 +706,29 @@ export async function renderStoryChapters(options: RenderStoryChaptersOptions): 
           signal: options.abortSignal
         });
         const chapterPath = path.join(chaptersDir, `${chapter.chapterId}.md`);
-        const normalizedChapterText = normalizeRenderedChapterText(chapterText);
+        let normalizedChapterText = normalizeRenderedChapterText(chapterText);
 
         if (!normalizedChapterText) {
           throw new Error("The model returned an empty chapter.");
+        }
+
+        if (options.validateOutput) {
+          const gateResult = await runChapterValidationRepairGate({
+            cwd: options.cwd,
+            model: options.model,
+            project,
+            chapterId: chapter.chapterId,
+            text: normalizedChapterText,
+            runner: options.runner,
+            maxRepairAttempts: options.maxRepairAttempts,
+            abortSignal: options.abortSignal
+          });
+          normalizedChapterText = normalizeRenderedChapterText(gateResult.text);
+          if (!gateResult.report.passed) {
+            throw new Error(
+              gateResult.report.issues.map((issue) => issue.message).join("; ")
+            );
+          }
         }
 
         fs.writeFileSync(chapterPath, `${normalizedChapterText}\n`, "utf8");
@@ -773,6 +801,9 @@ export interface CompileStoryChaptersResult {
 }
 
 export function compileStoryChapters(options: CompileStoryChaptersOptions): CompileStoryChaptersResult {
+  if (options.projectId) {
+    migrateLegacyStoryArtifacts(options.cwd, options.projectId, options.project);
+  }
   const artifactPaths = getStoryArtifactPaths(options.cwd, options.projectId);
   const chaptersDir = artifactPaths.chapters;
   const outputPath = options.outputPath

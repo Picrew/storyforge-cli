@@ -79,6 +79,7 @@ import {
   runStoryCi
 } from "../story/simulation.js";
 import type { StoryLibraryEntry, StoryProject } from "../story/types.js";
+import { findLatestIncompleteStoryTaskCheckpoint } from "../story/task-checkpoint.js";
 import { AppShell } from "./AppShell.js";
 import type {
   AppState,
@@ -274,6 +275,7 @@ export function App({
   const oauthSessionRef = useRef<ManagedOauthSession | null>(null);
   const oauthRunIdRef = useRef(0);
   const storyTaskRunIdRef = useRef(0);
+  const storyAbortControllerRef = useRef<AbortController | null>(null);
   const modelCacheRef = useRef<Map<string, readonly string[]>>(new Map());
   const modelFetchingRef = useRef<Set<string>>(new Set());
   const structuredRunner = structuredRunnerOverride ?? runStructuredPrompt;
@@ -1264,10 +1266,13 @@ export function App({
     baseProject: StoryProject,
     projectId: string | null,
     scope: "all" | "world" | "characters" | "timeline" | "outline",
-    model: string
+    model: string,
+    resumeTaskId?: string
   ): Promise<void> => {
     await Promise.resolve();
     let result: StoryTaskResult;
+    const abortController = new AbortController();
+    storyAbortControllerRef.current = abortController;
 
     try {
       result = await runStoryTask({
@@ -1277,6 +1282,27 @@ export function App({
         project: baseProject,
         runner: structuredRunner,
         scope,
+        taskId: resumeTaskId,
+        resume: Boolean(resumeTaskId),
+        abortSignal: abortController.signal,
+        onCheckpoint: (checkpoint) => {
+          if (storyTaskRunIdRef.current !== runId) {
+            return;
+          }
+          applyStateUpdate((activeState) => ({
+            ...activeState,
+            pendingTask: {
+              kind: taskKind,
+              stage: checkpoint.currentStage,
+              taskId: checkpoint.id,
+              stageIndex: checkpoint.stageIndex,
+              totalStages: checkpoint.totalStages,
+              startedAt: new Date(checkpoint.startedAt).getTime(),
+              retryCount: checkpoint.retryCount,
+              checkpointPath: checkpoint.checkpointPath
+            }
+          }));
+        },
         onStageStart: ({ project, view, message }) => {
           if (storyTaskRunIdRef.current !== runId) {
             return;
@@ -1333,7 +1359,14 @@ export function App({
           "Story task failed."
         )
       );
+      if (storyAbortControllerRef.current === abortController) {
+        storyAbortControllerRef.current = null;
+      }
       return;
+    }
+
+    if (storyAbortControllerRef.current === abortController) {
+      storyAbortControllerRef.current = null;
     }
 
     if (storyTaskRunIdRef.current !== runId) {
@@ -1603,6 +1636,7 @@ export function App({
         chapterIds: command.chapterIds,
         style: command.style,
         force: command.force,
+        validateOutput: true,
         runner: structuredRunner
       });
 
@@ -2569,6 +2603,107 @@ export function App({
     }
 
     switch (parsedCommand.command) {
+      case "/cancel":
+        if (!currentState.pendingTask || !storyAbortControllerRef.current) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "No cancellable story task is running.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+        storyAbortControllerRef.current.abort("Cancelled by user.");
+        return {
+          nextState: setTransientNotice(
+            clearInputValue(currentState),
+            "Cancellation requested; checkpoint preserved.",
+            now
+          ),
+          shouldExit: false
+        };
+
+      case "/retry":
+      case "/resume": {
+        if (currentState.pendingTask) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "Cancel or wait for the current task first.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+        if (!currentState.storyProject || !currentState.storyProjectId || !currentState.config.model) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "A project and model are required to resume.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+        const checkpoint = findLatestIncompleteStoryTaskCheckpoint(cwd, currentState.storyProjectId);
+        if (!checkpoint) {
+          return {
+            nextState: setTransientNotice(
+              clearInputValue(currentState),
+              "No incomplete checkpoint was found.",
+              now
+            ),
+            shouldExit: false
+          };
+        }
+        const scope = checkpoint.scope as "all" | "world" | "characters" | "timeline" | "outline";
+        const storyRunId = storyTaskRunIdRef.current + 1;
+        storyTaskRunIdRef.current = storyRunId;
+        const taskKind = checkpoint.kind === "story-refresh"
+          ? "story-refresh"
+          : "story-bootstrap";
+        const pendingEntry: TranscriptEntry = {
+          id: `story-resume-${Date.now()}-${storyRunId}`,
+          prompt: parsedCommand.command,
+          response: `Resuming checkpoint ${checkpoint.id}...`,
+          provider: currentState.config.connection?.provider ?? "storyforge",
+          model: currentState.config.model,
+          failed: false,
+          streaming: false
+        };
+
+        void runStoryPipeline(
+          storyRunId,
+          taskKind,
+          currentState.storyProject,
+          currentState.storyProjectId,
+          scope,
+          currentState.config.model,
+          checkpoint.id
+        );
+
+        return {
+          nextState: appendTranscriptEntry(
+            {
+              ...clearInputValue(currentState),
+              pendingTask: {
+                kind: taskKind,
+                stage: checkpoint.currentStage,
+                taskId: checkpoint.id,
+                stageIndex: checkpoint.stageIndex,
+                totalStages: checkpoint.totalStages,
+                startedAt: new Date(checkpoint.startedAt).getTime(),
+                retryCount: checkpoint.retryCount,
+                checkpointPath: checkpoint.checkpointPath
+              }
+            },
+            pendingEntry
+          ),
+          shouldExit: false
+        };
+      }
+
       case "/connect":
         if (parsedCommand.args.length === 0) {
           return {

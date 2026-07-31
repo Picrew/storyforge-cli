@@ -132,6 +132,71 @@ describe("story render and compile", () => {
     expect(fs.existsSync(result.outputPath)).toBe(false);
   });
 
+  it("migrates legacy chapter artifacts once into the owning project", () => {
+    const cwd = makeTempDir();
+    const project = createProjectForRender();
+    const legacyChapterPath = path.join(cwd, ".storyforge", "chapters", "ch01.md");
+    fs.mkdirSync(path.dirname(legacyChapterPath), { recursive: true });
+    fs.writeFileSync(legacyChapterPath, "Legacy project prose.\n", "utf8");
+    fs.mkdirSync(path.join(cwd, ".storyforge", "logs"), { recursive: true });
+    fs.writeFileSync(path.join(cwd, ".storyforge", "logs", "legacy.log"), "legacy log\n", "utf8");
+    fs.mkdirSync(path.join(cwd, ".storyforge", "cache"), { recursive: true });
+    fs.writeFileSync(path.join(cwd, ".storyforge", "cache", "legacy.json"), "{}\n", "utf8");
+    project.chapterRenders.push({
+      chapterId: "ch01",
+      file: "chapters/ch01.md",
+      renderedAt: "2026-03-12T00:00:00.000Z",
+      model: "deepseek/deepseek-chat",
+      commitIds: ["commit-1"],
+      dirty: false
+    });
+
+    const result = compileStoryChapters({
+      cwd,
+      projectId: "migrated-project",
+      project,
+      chapterIds: ["ch01"],
+      outputPath: null
+    });
+    const migratedChapterPath = path.join(
+      cwd,
+      ".storyforge",
+      "artifacts",
+      "migrated-project",
+      "chapters",
+      "ch01.md"
+    );
+    const markerPath = path.join(
+      cwd,
+      ".storyforge",
+      "artifacts",
+      "migrated-project",
+      "cache",
+      "artifact-migration-v1.json"
+    );
+
+    expect(result.wroteOutput).toBe(true);
+    expect(fs.readFileSync(migratedChapterPath, "utf8")).toContain("Legacy project prose");
+    expect(fs.existsSync(markerPath)).toBe(true);
+    expect(fs.existsSync(legacyChapterPath)).toBe(true);
+    expect(fs.existsSync(path.join(
+      cwd,
+      ".storyforge",
+      "artifacts",
+      "migrated-project",
+      "logs",
+      "legacy.log"
+    ))).toBe(true);
+    expect(fs.existsSync(path.join(
+      cwd,
+      ".storyforge",
+      "artifacts",
+      "migrated-project",
+      "cache",
+      "legacy.json"
+    ))).toBe(true);
+  });
+
   it("renders dirty chapters to markdown files and updates metadata", async () => {
     const cwd = makeTempDir();
     const runner: StructuredRunner = async ({ stage }) =>
