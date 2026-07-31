@@ -12,7 +12,7 @@ describe("Header rendering", () => {
 
     expect(app.lastFrame()).toContain("/================");
     expect(app.lastFrame()).toContain("::::::  ::::::");
-    expect(app.lastFrame()).toContain("STORYFORGE // preview build");
+    expect(app.lastFrame()).toContain("STORYFORGE // v0.1.4");
     app.unmount();
   });
 

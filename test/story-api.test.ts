@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { InMemoryRunTaskStore, createStoryforgeApiServer } from "../packages/cli/src/api/server.js";
 import { ApiServiceError, DEFAULT_API_OUTPUT_ROOT } from "../packages/cli/src/api/service.js";
+import { loadStoryProject } from "../packages/cli/src/story/project-store.js";
 
 interface JsonEnvelope<T = unknown> {
   code: number;
@@ -533,6 +534,56 @@ describe("storyforge api server", () => {
 
     expect(compile.payload.code).toBe(0);
     expect(fs.existsSync(compile.payload.data.output_path)).toBe(true);
+  }, API_TEST_TIMEOUT_MS);
+
+  it("serializes concurrent renders for one project without losing metadata", async () => {
+    const workspaceDir = path.join(tempRoot, "concurrent-render");
+    const init = await postJson<{ workspace_dir: string; project_id: string }>(
+      apiBaseUrl,
+      "/api/v1/story/init",
+      {
+        workspace_dir: workspaceDir,
+        title: "Concurrent Story",
+        prompt: "Write a short cyberpunk story with two chapters.",
+        model_config: {
+          api_url: providerBaseUrl,
+          api_key: "test-key",
+          model: "deepseek-chat"
+        }
+      }
+    );
+    const common = {
+      workspace_dir: init.payload.data.workspace_dir,
+      project_id: init.payload.data.project_id,
+      force: true,
+      model_config: {
+        api_url: providerBaseUrl,
+        api_key: "test-key",
+        model: "deepseek-chat"
+      }
+    };
+    setFakeProviderDelayMs(80);
+    try {
+      const [first, second] = await Promise.all([
+        postJson(apiBaseUrl, "/api/v1/story/render", {
+          ...common,
+          chapter_ids: ["ch01"]
+        }),
+        postJson(apiBaseUrl, "/api/v1/story/render", {
+          ...common,
+          chapter_ids: ["ch02"]
+        })
+      ]);
+      expect(first.payload.code).toBe(0);
+      expect(second.payload.code).toBe(0);
+    } finally {
+      setFakeProviderDelayMs(0);
+    }
+
+    expect(
+      loadStoryProject(workspaceDir, init.payload.data.project_id)
+        ?.chapterRenders.map((entry) => entry.chapterId).sort()
+    ).toEqual(["ch01", "ch02"]);
   }, API_TEST_TIMEOUT_MS);
 
   it("returns validation errors for invalid edit payload", async () => {

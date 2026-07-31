@@ -85,7 +85,7 @@ describe("online deepseek story pipeline", () => {
         resume: Boolean(resumeTaskId)
       });
 
-      expect(bootstrapResult.ok).toBe(true);
+      expect(bootstrapResult.ok, bootstrapResult.errorMessage ?? "bootstrap failed").toBe(true);
       expect(bootstrapResult.project.outline.length).toBeGreaterThan(0);
 
       const commitResult = await commitStoryEvent({

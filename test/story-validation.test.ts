@@ -15,6 +15,11 @@ import {
   validateStoryProject
 } from "../packages/cli/src/story/story-validation.js";
 import type { StructuredRunner } from "../packages/cli/src/story/structured-run.js";
+import {
+  createStoryTaskCheckpoint,
+  findLatestIncompleteStoryTaskCheckpoint,
+  getStoryTaskCheckpointPath
+} from "../packages/cli/src/story/task-checkpoint.js";
 
 function createValidProject() {
   const project = createBlankStoryProject(undefined, "Validated Story");
@@ -153,6 +158,85 @@ describe("story validation and repair gate", () => {
     expect(result.repairedTargets).toEqual(["timeline"]);
     expect(stages).toEqual(["repair-timeline"]);
     expect(result.project.characters).toEqual(project.characters);
+  });
+
+  it("repairs invalid commit attribution in eventCommits without rewriting timeline", async () => {
+    const project = createValidProject();
+    project.eventCommits.push({
+      id: "commit-1",
+      chapterId: "ch99",
+      createdAt: new Date().toISOString(),
+      message: "Misfiled event",
+      patchOps: [],
+      reads: [],
+      writes: [],
+      forced: false,
+      ciPassed: true,
+      ciReport: null
+    });
+    const originalTimeline = structuredClone(project.timeline);
+    const runner: StructuredRunner = async ({ stage }) => {
+      expect(stage).toBe("repair-eventCommits");
+      return JSON.stringify({
+        eventCommits: [{ ...project.eventCommits[0], chapterId: "ch01" }]
+      });
+    };
+
+    const result = await runStoryValidationRepairGate(project, {
+      cwd: fs.mkdtempSync(path.join(os.tmpdir(), "storyforge-validation-")),
+      model: "deepseek/deepseek-v4-flash",
+      runner
+    });
+
+    expect(result.report.passed).toBe(true);
+    expect(result.repairedTargets).toEqual(["eventCommits"]);
+    expect(result.project.timeline).toEqual(originalTimeline);
+  });
+
+  it("publishes each repaired target before a later target fails", async () => {
+    const project = createValidProject();
+    project.characters.push({ ...project.characters[0] });
+    project.timeline[0].chapterRef = "unknown";
+    const published: string[] = [];
+    const runner: StructuredRunner = async ({ stage }) => {
+      if (stage === "repair-characters") {
+        return JSON.stringify({ characters: [project.characters[0]] });
+      }
+      throw new Error("later repair failed");
+    };
+
+    await expect(runStoryValidationRepairGate(project, {
+      cwd: fs.mkdtempSync(path.join(os.tmpdir(), "storyforge-validation-")),
+      model: "deepseek/deepseek-v4-flash",
+      runner,
+      onTargetRepaired: ({ project: repaired, target }) => {
+        published.push(target);
+        expect(repaired.characters).toHaveLength(1);
+      }
+    })).rejects.toThrow("later repair failed");
+
+    expect(published).toEqual(["characters"]);
+  });
+
+  it("quarantines malformed checkpoints instead of attempting unsafe resume", () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "storyforge-checkpoint-"));
+    const checkpoint = createStoryTaskCheckpoint({
+      cwd,
+      projectId: "project-a",
+      kind: "story-bootstrap",
+      scope: "all",
+      stages: ["foundation", "characters"]
+    });
+    const checkpointPath = getStoryTaskCheckpointPath(cwd, "project-a", checkpoint.id);
+    fs.writeFileSync(checkpointPath, JSON.stringify({ ...checkpoint, completedStages: null }), "utf8");
+
+    expect(() => findLatestIncompleteStoryTaskCheckpoint(cwd, "project-a")).toThrow(
+      /quarantined/
+    );
+    expect(fs.existsSync(checkpointPath)).toBe(false);
+    expect(
+      fs.readdirSync(path.dirname(checkpointPath)).some((entry) => entry.includes(".corrupt-"))
+    ).toBe(true);
   });
 
   it("repairs a failed chapter without regenerating other chapters", async () => {

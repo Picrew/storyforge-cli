@@ -3,19 +3,19 @@ export const copy = {
   subtitle: "A terminal foundry for scenes, arcs, and long-form fiction.",
   welcomeTitle: "Session notes",
   welcomeBody: [
-    "Start with a premise, scene beat, or character voice.",
-    "Press Enter to test the shell loop before story tools arrive.",
-    "Outlines, chapters, and long-form drafting land next."
+    "Start with /story <premise> to build the world, cast, timeline, and outline.",
+    "Use /commit, /render, and /compile to turn approved events into chapters.",
+    "Run /help at any time for commands and recovery controls."
   ],
   condensedWelcomeBody: [
-    "Start with a premise, scene beat, or character voice.",
-    "Press Enter now; long-form drafting lands next."
+    "Start with /story <premise>.",
+    "Use /help for commands."
   ],
   placeholder: "Describe a premise, scene, or character...",
-  previewNotice: "UI preview only. Story actions are not implemented yet.",
+  previewNotice: "Story workspace ready.",
   footer: {
-    center: "preview mode",
-    right: "writer-shell",
-    compact: "preview mode | storyforge"
+    center: "ready",
+    right: "story workspace",
+    compact: "ready | storyforge"
   }
 } as const;

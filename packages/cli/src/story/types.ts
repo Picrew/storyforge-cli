@@ -174,7 +174,8 @@ export interface PendingTask {
     | "story-commit"
     | "story-ci"
     | "story-render"
-    | "story-compile";
+    | "story-compile"
+    | "story-validate";
   stage: string | null;
   taskId?: string;
   stageIndex?: number;

@@ -300,4 +300,25 @@ describe("story v2 command parsing", () => {
     expect(compileResult.chapterIds).toEqual(["ch01", "ch02"]);
     expect(compileResult.outputPath).toBe(".storyforge/manuscript/story.md");
   });
+
+  it("parses scoped validation with failed-section repair", () => {
+    const result = handleStoryCommand(
+      {
+        currentProject: createReadyProject(),
+        currentProjectId: "p1",
+        projects: []
+      },
+      {
+        command: "/validate",
+        args: ["ch01..ch02", "--repair"]
+      }
+    );
+
+    expect(result.type).toBe("validate");
+    if (result.type !== "validate") {
+      throw new Error("Expected validate result.");
+    }
+    expect(result.chapterIds).toEqual(["ch01", "ch02"]);
+    expect(result.repair).toBe(true);
+  });
 });

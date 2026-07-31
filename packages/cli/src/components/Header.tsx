@@ -90,9 +90,9 @@ function isFrameRow(mode: ViewportMode, index: number): boolean {
 
 export function Header({ mode }: HeaderProps): React.JSX.Element {
   const ornament = mode === "hero" ? "----------------" : "----------";
-  const strapline = mode === "minimal" ? "preview shell" : "chapter zero // preview shell";
+  const strapline = mode === "minimal" ? "story workspace" : "chapter zero // story workspace";
   const shellLabel = copy.brand;
-  const shellSuffix = mode === "minimal" ? " // preview shell" : " // preview build";
+  const shellSuffix = " // v0.1.4";
 
   return (
     <Box flexDirection="column" alignItems="center">
