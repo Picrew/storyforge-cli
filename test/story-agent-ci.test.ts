@@ -107,6 +107,15 @@ describe("story agent CI rules", () => {
 
   it("keeps timeline monotonic when adding an early chapter beat", async () => {
     const project = createBaseProject();
+    project.outline = Array.from({ length: 6 }, (_, index) => ({
+      id: `outline-${index + 1}`,
+      number: index + 1,
+      title: `Chapter ${index + 1}`,
+      purpose: "",
+      summary: "",
+      hook: "",
+      targetWords: 600
+    }));
 
     project.timeline = Array.from({ length: 6 }, (_, index) => ({
       id: `beat-${index + 1}`,

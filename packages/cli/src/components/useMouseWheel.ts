@@ -5,7 +5,7 @@ const MOUSE_SGR_DISABLE = "\x1b[?1000l\x1b[?1006l";
 
 // SGR extended mouse format: ESC [ < button ; col ; row M/m
 // Button 64 = scroll up, 65 = scroll down
-const SGR_MOUSE_RE = /\x1b\[<(\d+);\d+;\d+[Mm]/g;
+const SGR_MOUSE_RE = new RegExp(`${String.fromCharCode(27)}\\[<(\\d+);\\d+;\\d+[Mm]`, "g");
 
 const SCROLL_UP_BUTTON = 64;
 const SCROLL_DOWN_BUTTON = 65;

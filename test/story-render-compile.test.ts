@@ -66,6 +66,72 @@ function createProjectForRender(chapterCount: number = 1) {
 }
 
 describe("story render and compile", () => {
+  it("isolates chapter and manuscript artifacts by project id", async () => {
+    const cwd = makeTempDir();
+    const firstProject = createProjectForRender();
+    const secondProject = createProjectForRender();
+    const runner: StructuredRunner = async ({ prompt }) =>
+      prompt.includes("First Project") ? "First project prose" : "Second project prose";
+
+    firstProject.meta.title = "First Project";
+    secondProject.meta.title = "Second Project";
+
+    await renderStoryChapters({
+      cwd,
+      projectId: "project-a",
+      model: "deepseek/deepseek-v4-flash",
+      project: firstProject,
+      chapterIds: ["ch01"],
+      style: null,
+      force: true,
+      runner
+    });
+    await renderStoryChapters({
+      cwd,
+      projectId: "project-b",
+      model: "deepseek/deepseek-v4-flash",
+      project: secondProject,
+      chapterIds: ["ch01"],
+      style: null,
+      force: true,
+      runner
+    });
+
+    const firstCompile = compileStoryChapters({
+      cwd,
+      projectId: "project-a",
+      project: firstProject,
+      chapterIds: ["ch01"],
+      outputPath: null
+    });
+    const secondCompile = compileStoryChapters({
+      cwd,
+      projectId: "project-b",
+      project: secondProject,
+      chapterIds: ["ch01"],
+      outputPath: null
+    });
+
+    expect(fs.readFileSync(firstCompile.outputPath, "utf8")).toContain("First project prose");
+    expect(fs.readFileSync(secondCompile.outputPath, "utf8")).toContain("Second project prose");
+    expect(firstCompile.outputPath).not.toBe(secondCompile.outputPath);
+  });
+
+  it("does not create a title-only manuscript when every chapter is missing", () => {
+    const cwd = makeTempDir();
+    const result = compileStoryChapters({
+      cwd,
+      projectId: "empty-project",
+      project: createProjectForRender(),
+      chapterIds: ["ch01"],
+      outputPath: null
+    });
+
+    expect(result.wroteOutput).toBe(false);
+    expect(result.compiledChapters).toEqual([]);
+    expect(fs.existsSync(result.outputPath)).toBe(false);
+  });
+
   it("renders dirty chapters to markdown files and updates metadata", async () => {
     const cwd = makeTempDir();
     const runner: StructuredRunner = async ({ stage }) =>

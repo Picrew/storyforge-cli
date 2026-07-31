@@ -276,11 +276,16 @@ def apply_patch_op(project: Dict[str, Any], chapter_id: str, patch_op: Dict[str,
 
     if op == "timeline.add":
         label = str(payload.get("label", "")).strip() or "Untitled Beat"
+        requested_chapter_ref = str(payload.get("chapterRef", chapter_id)).strip()
+        if requested_chapter_ref.lower() != chapter_id.lower():
+            raise ValueError(
+                f"timeline.add chapterRef must match commit chapter {chapter_id}; got {requested_chapter_ref}"
+            )
         beat = {
             "id": str(payload.get("id", uuid.uuid4())),
             "label": label,
             "summary": str(payload.get("summary", "")),
-            "chapterRef": str(payload.get("chapterRef", chapter_id)),
+            "chapterRef": chapter_id,
             "stakes": str(payload.get("stakes", "")),
             "notes": str(payload.get("notes", "")),
         }
@@ -294,6 +299,8 @@ def apply_patch_op(project: Dict[str, Any], chapter_id: str, patch_op: Dict[str,
         field = str(payload.get("field", "")).strip()
         if field not in {"label", "summary", "chapterRef", "stakes", "notes"}:
             raise ValueError(f"Unknown timeline field: {field}")
+        if field == "chapterRef" and str(payload.get("value", "")).strip().lower() != chapter_id.lower():
+            raise ValueError(f"timeline.set chapterRef must match commit chapter {chapter_id}")
         beat[field] = str(payload.get("value", ""))
         return
 
@@ -517,22 +524,17 @@ def extract_chapter_number_from_ref(value: Any) -> int | None:
 def max_chapter_in_project(project: Dict[str, Any]) -> int:
     numbers: List[int] = []
 
-    for row in project.get("outline", []):
-        number = row.get("number")
-        if isinstance(number, (int, float)):
-            numbers.append(int(round(number)))
-
-    for beat in project.get("timeline", []):
-        parsed = extract_chapter_number_from_ref(beat.get("chapterRef"))
-        if parsed is not None:
-            numbers.append(parsed)
-
     for commit in project.get("eventCommits", []):
         parsed = chapter_number(commit.get("chapterId"))
         if parsed is not None:
             numbers.append(parsed)
 
-    return max(numbers) if numbers else 1
+    for render in project.get("chapterRenders", []):
+        parsed = chapter_number(render.get("chapterId"))
+        if parsed is not None:
+            numbers.append(parsed)
+
+    return max(numbers) if numbers else 0
 
 
 def action_run_ci(request: Dict[str, Any]) -> Dict[str, Any]:
@@ -546,17 +548,40 @@ def action_run_ci(request: Dict[str, Any]) -> Dict[str, Any]:
     last_chapter_ref: int | None = None
     for beat in project.get("timeline", []):
         raw_ref = beat.get("chapterRef", "")
-        beat_ref = extract_chapter_number_from_ref(raw_ref)
+        exact_ref = isinstance(raw_ref, str) and re.fullmatch(r"ch0*[1-9]\d*", raw_ref.strip(), re.IGNORECASE)
+        beat_ref = chapter_number(raw_ref) if exact_ref else None
         if beat_ref is None:
             if isinstance(raw_ref, str) and raw_ref.strip():
+                message = f"Timeline beat '{beat.get('label', '')}' has an invalid chapterRef: '{raw_ref}'. Expected chNN."
                 warnings.append(
                     issue(
                         "timeline_invalid_ref",
                         "warning",
-                        f"Timeline beat '{beat.get('label', '')}' has an invalid chapterRef: '{raw_ref}'.",
+                        message,
+                    )
+                )
+                errors.append(
+                    issue(
+                        "timeline_invalid_ref",
+                        "error",
+                        message,
                     )
                 )
             continue
+        known_outline_numbers = {
+            int(round(row.get("number")))
+            for row in project.get("outline", [])
+            if isinstance(row.get("number"), (int, float))
+        }
+        if known_outline_numbers and beat_ref not in known_outline_numbers:
+            errors.append(
+                issue(
+                    "timeline_missing_chapter",
+                    "error",
+                    f"Timeline beat '{beat.get('label', '')}' points to missing chapter '{raw_ref}'.",
+                    normalize_chapter_id(raw_ref),
+                )
+            )
         if last_chapter_ref is not None and beat_ref < last_chapter_ref:
             errors.append(
                 issue(
@@ -573,8 +598,14 @@ def action_run_ci(request: Dict[str, Any]) -> Dict[str, Any]:
     for character in project.get("characters", []):
         known_character_tokens.add(str(character.get("id", "")).strip().lower())
         known_character_tokens.add(str(character.get("name", "")).strip().lower())
-    known_item_tokens = set(str(item.get("id", "")).strip().lower() for item in project.get("inventory", []))
-    known_foreshadow_tokens = set(str(entry.get("id", "")).strip().lower() for entry in project.get("foreshadows", []))
+    known_item_tokens = set()
+    for item in project.get("inventory", []):
+        known_item_tokens.add(str(item.get("id", "")).strip().lower())
+        known_item_tokens.add(str(item.get("name", "")).strip().lower())
+    known_foreshadow_tokens = set()
+    for entry in project.get("foreshadows", []):
+        known_foreshadow_tokens.add(str(entry.get("id", "")).strip().lower())
+        known_foreshadow_tokens.add(str(entry.get("label", "")).strip().lower())
     world_fields = set(project.get("world", {}).keys())
 
     commits_for_entity_checks = project.get("eventCommits", [])

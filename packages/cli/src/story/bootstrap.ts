@@ -27,6 +27,7 @@ export interface StoryTaskProgress {
 
 export interface StoryTaskOptions {
   cwd: string;
+  projectId?: string | null;
   model: string;
   project: StoryProject;
   runner: StructuredRunner;
@@ -150,8 +151,84 @@ function hasReadySections(project: StoryProject): boolean {
     project.outline.length > 0;
 }
 
-function ensureSaved(cwd: string, project: StoryProject): void {
-  const saveError = saveStoryProject(cwd, project);
+function assertStageResult(stage: StoryBootstrapStage, project: StoryProject): void {
+  const fail = (message: string): never => {
+    throw new Error(`${stage} validation failed: ${message}`);
+  };
+
+  if (stage === "foundation") {
+    if (!project.meta.title.trim() || project.meta.title === "Untitled Story") {
+      fail("title is missing.");
+    }
+    if (!project.world.premise.trim() || !project.world.setting.trim()) {
+      fail("world premise and setting are required.");
+    }
+    return;
+  }
+
+  if (stage === "characters") {
+    if (project.characters.length === 0) {
+      fail("at least one character is required.");
+    }
+    const names = new Set<string>();
+    for (const character of project.characters) {
+      const name = character.name.trim();
+      if (!name || !character.role.trim()) {
+        fail("every character requires a name and role.");
+      }
+      const key = name.toLocaleLowerCase();
+      if (names.has(key)) {
+        fail(`duplicate character name: ${name}.`);
+      }
+      names.add(key);
+    }
+    return;
+  }
+
+  if (stage === "timeline") {
+    if (project.timeline.length === 0) {
+      fail("at least one timeline beat is required.");
+    }
+    for (const beat of project.timeline) {
+      if (!beat.label.trim() || !beat.summary.trim()) {
+        fail("every timeline beat requires a label and summary.");
+      }
+      if (!/^ch0*[1-9]\d*$/i.test(beat.chapterRef.trim())) {
+        fail(`invalid chapterRef '${beat.chapterRef || "(empty)"}'; expected chNN.`);
+      }
+    }
+    return;
+  }
+
+  if (project.outline.length === 0) {
+    fail("at least one chapter is required.");
+  }
+
+  const chapterNumbers = new Set<number>();
+  for (const chapter of project.outline) {
+    if (!Number.isInteger(chapter.number) || chapter.number < 1) {
+      fail(`invalid chapter number: ${chapter.number}.`);
+    }
+    if (chapterNumbers.has(chapter.number)) {
+      fail(`duplicate chapter number: ${chapter.number}.`);
+    }
+    if (!chapter.title.trim() || !chapter.summary.trim()) {
+      fail(`chapter ${chapter.number} requires a title and summary.`);
+    }
+    chapterNumbers.add(chapter.number);
+  }
+
+  for (const beat of project.timeline) {
+    const match = /^ch(0*[1-9]\d*)$/i.exec(beat.chapterRef.trim());
+    const chapterNumber = match ? Number(match[1]) : null;
+    if (chapterNumber === null || !chapterNumbers.has(chapterNumber)) {
+      fail(`timeline beat '${beat.label}' points to missing chapter '${beat.chapterRef}'.`);
+    }
+  }
+}
+
+function ensureSaved(cwd: string, project: StoryProject, projectId?: string | null): void {
+  const saveError = saveStoryProject(cwd, project, projectId);
 
   if (saveError) {
     throw new Error(saveError);
@@ -392,7 +469,9 @@ async function runStage(
         signal: options.abortSignal
       });
       const payload = parseStructuredJson<FoundationPayload>(raw);
-      return applyFoundationStage(project, payload);
+      const nextProject = applyFoundationStage(project, payload);
+      assertStageResult(stage, nextProject);
+      return nextProject;
     }
     case "characters": {
       const raw = await options.runner({
@@ -403,10 +482,12 @@ async function runStage(
         signal: options.abortSignal
       });
       const payload = parseStructuredJson<CharacterPayload>(raw);
-      return touchProject({
+      const nextProject = touchProject({
         ...cloneProject(project),
         characters: normalizeCharacters(project, payload)
       });
+      assertStageResult(stage, nextProject);
+      return nextProject;
     }
     case "timeline": {
       const raw = await options.runner({
@@ -417,10 +498,12 @@ async function runStage(
         signal: options.abortSignal
       });
       const payload = parseStructuredJson<TimelinePayload>(raw);
-      return touchProject({
+      const nextProject = touchProject({
         ...cloneProject(project),
         timeline: normalizeTimeline(project, payload)
       });
+      assertStageResult(stage, nextProject);
+      return nextProject;
     }
     case "outline": {
       const raw = await options.runner({
@@ -431,10 +514,12 @@ async function runStage(
         signal: options.abortSignal
       });
       const payload = parseStructuredJson<OutlinePayload>(raw);
-      return touchProject({
+      const nextProject = touchProject({
         ...cloneProject(project),
         outline: normalizeOutline(project, payload)
       });
+      assertStageResult(stage, nextProject);
+      return nextProject;
     }
   }
 }
@@ -495,7 +580,7 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
 
     try {
       nextProject = await runStageWithRetry(options, nextProject, stage);
-      ensureSaved(options.cwd, nextProject);
+      ensureSaved(options.cwd, nextProject, options.projectId);
       options.onStageComplete?.({
         stage,
         view: getProgressView(stage),
@@ -513,7 +598,7 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
       });
 
       try {
-        ensureSaved(options.cwd, nextProject);
+        ensureSaved(options.cwd, nextProject, options.projectId);
       } catch {
         // Preserve the original failure. The app will surface the stage error.
       }
@@ -535,7 +620,7 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
       status: nextStatus
     }
   });
-  ensureSaved(options.cwd, nextProject);
+  ensureSaved(options.cwd, nextProject, options.projectId);
 
   return {
     ok: true,

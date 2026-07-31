@@ -18,8 +18,9 @@
     "build": "tsc -p tsconfig.json",
     "lint": "pnpm --dir ../.. exec eslint --config ./eslint.config.mjs ./packages/cli/src ./test ./vitest.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
-    "test": "pnpm --dir ../.. exec vitest run --config ./vitest.config.ts",
-    "test:offline": "pnpm --dir ../.. exec vitest run --config ./vitest.config.ts --exclude test/story-online-deepseek.test.ts"
+    "test": "pnpm --dir ../.. exec vitest run --config ./vitest.config.ts --exclude test/story-online-deepseek.test.ts",
+    "test:offline": "pnpm --dir ../.. exec vitest run --config ./vitest.config.ts --exclude test/story-online-deepseek.test.ts",
+    "test:online": "pnpm --dir ../.. exec vitest run --config ./vitest.config.ts test/story-online-deepseek.test.ts"
   },
   "engines": {
     "node": ">=20"

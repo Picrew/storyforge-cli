@@ -768,6 +768,7 @@ async function runBootstrapFromPrompt(options: {
 
   const result = await runStoryTask({
     cwd: options.workspaceDir,
+    projectId: options.projectId,
     model: options.model,
     project: bootProject,
     runner: options.runner,
@@ -838,6 +839,7 @@ async function runRefresh(options: {
 
   const result = await runStoryTask({
     cwd: options.context.workspaceDir,
+    projectId: options.context.projectId,
     model: options.model,
     project: bootProject,
     runner: options.runner,
@@ -874,11 +876,11 @@ async function runRefresh(options: {
 function materializeCompileOutputPath(
   workspaceDir: string,
   outputPath: string | undefined | null
-): string {
+): string | null {
   const maybePath = asOptionalString(outputPath);
 
   if (!maybePath) {
-    return path.join(workspaceDir, "manuscript.md");
+    return null;
   }
 
   return path.isAbsolute(maybePath)
@@ -1105,6 +1107,7 @@ export async function executeStoryRenderRequest(request: StoryRenderRequest): Pr
   chapter_ids: string[];
   rendered: string[];
   skipped: string[];
+  errors: Array<{ chapter_id: string; message: string }>;
 }> {
   const context = loadWorkspaceProject(request.workspace_dir, request.project_id);
   const chapterIds = resolveChapterIds(context.project, request.chapter_range, request.chapter_ids);
@@ -1112,6 +1115,7 @@ export async function executeStoryRenderRequest(request: StoryRenderRequest): Pr
 
   const result = await renderStoryChapters({
     cwd: context.workspaceDir,
+    projectId: context.projectId,
     model: runtime.model,
     project: context.project,
     chapterIds,
@@ -1132,7 +1136,11 @@ export async function executeStoryRenderRequest(request: StoryRenderRequest): Pr
     project: result.project,
     chapter_ids: chapterIds,
     rendered: result.rendered,
-    skipped: result.skipped
+    skipped: result.skipped,
+    errors: result.errors.map((entry) => ({
+      chapter_id: entry.chapterId,
+      message: entry.message
+    }))
   };
 }
 
@@ -1149,6 +1157,7 @@ export function executeStoryCompileRequest(request: StoryCompileRequest): {
 
   const result = compileStoryChapters({
     cwd: context.workspaceDir,
+    projectId: context.projectId,
     project: context.project,
     chapterIds,
     outputPath
@@ -1318,6 +1327,7 @@ export async function executeStoryRunRequest(
 
   const renderResult = await renderStoryChapters({
     cwd: workspaceDir,
+    projectId: createResult.projectId,
     model: runtime.model,
     project,
     chapterIds: renderChapterIds,
@@ -1355,6 +1365,7 @@ export async function executeStoryRunRequest(
 
   const compileResult = compileStoryChapters({
     cwd: workspaceDir,
+    projectId: createResult.projectId,
     project,
     chapterIds: compileChapterIds,
     outputPath: manuscriptPath

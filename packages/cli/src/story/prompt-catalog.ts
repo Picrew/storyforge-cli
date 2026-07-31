@@ -184,7 +184,7 @@ export function buildCommitPatchPrompt(
     '      "payload": {',
     '        "label": "string",',
     '        "summary": "string",',
-    '        "chapterRef": "ch03",',
+    `        "chapterRef": ${JSON.stringify(chapterId)},`,
     '        "stakes": "string",',
     '        "notes": "string"',
     "      }",

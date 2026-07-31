@@ -143,14 +143,14 @@ function createStructuredRunner(
             {
               label: "Arrival",
               summary: "Mira arrives ready to pitch.",
-              chapterRef: "1",
+              chapterRef: "ch01",
               stakes: "Funding depends on first impressions.",
               notes: "Open with comic tension."
             },
             {
               label: "Reveal",
               summary: "An old friend exposes the cult connection.",
-              chapterRef: "1-2",
+              chapterRef: "ch02",
               stakes: "Mira fears public embarrassment.",
               notes: "Keep the cult harmless."
             }

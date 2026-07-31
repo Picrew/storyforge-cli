@@ -107,7 +107,11 @@ export function saveSessionConfig(
 ): string | null {
   try {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600
+    });
+    fs.chmodSync(configPath, 0o600);
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
