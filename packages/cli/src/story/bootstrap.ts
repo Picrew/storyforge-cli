@@ -7,6 +7,17 @@ import {
   buildTimelinePrompt
 } from "./prompt-catalog.js";
 import { parseStructuredJson, type StructuredRunner } from "./structured-run.js";
+import {
+  runStoryValidationRepairGate,
+  type StoryValidationReport
+} from "./story-validation.js";
+import {
+  createStoryTaskCheckpoint,
+  loadStoryTaskCheckpoint,
+  saveStoryTaskCheckpoint,
+  type StoryTaskCheckpoint
+} from "./task-checkpoint.js";
+import { writeStoryArtifactJson } from "./artifact-store.js";
 import type {
   ChapterPlan,
   CharacterProfile,
@@ -34,9 +45,15 @@ export interface StoryTaskOptions {
   scope: StoryRefreshScope;
   maxStageAttempts?: number;
   retryBaseDelayMs?: number;
+  maxRepairRounds?: number;
+  enableRepairGate?: boolean;
+  taskId?: string;
+  resume?: boolean;
   abortSignal?: AbortSignal;
   onStageStart?: (progress: StoryTaskProgress) => void;
   onStageComplete?: (progress: StoryTaskProgress) => void;
+  onStageRetry?: (progress: StoryTaskProgress & { attempt: number; errorMessage: string }) => void;
+  onCheckpoint?: (checkpoint: StoryTaskCheckpoint) => void;
 }
 
 export interface StoryTaskResult {
@@ -44,6 +61,8 @@ export interface StoryTaskResult {
   project: StoryProject;
   failedStage: StoryBootstrapStage | null;
   errorMessage: string | null;
+  validationReport: StoryValidationReport | null;
+  taskCheckpoint: StoryTaskCheckpoint | null;
 }
 
 interface FoundationPayload {
@@ -413,12 +432,54 @@ function normalizeTimeline(project: StoryProject, payload: TimelinePayload | Tim
   return source.map((entry, index) => {
     const record = entry as Record<string, unknown>;
     const existingId = project.timeline[index]?.id;
+    const rawChapterRef = asString(record.chapterRef);
+    const unambiguousChapterMatch = /^(?:chapter\s*|ch\s*|第\s*)?0*([1-9]\d*)\s*(?:章)?$/i.exec(
+      rawChapterRef
+    );
+    const wordChapterMatch = /^(?:chapter|ch)\s*(one|two|three|four|five|six|seven|eight|nine|ten)$/i.exec(
+      rawChapterRef
+    );
+    const wordChapterNumbers: Record<string, number> = {
+      one: 1,
+      two: 2,
+      three: 3,
+      four: 4,
+      five: 5,
+      six: 6,
+      seven: 7,
+      eight: 8,
+      nine: 9,
+      ten: 10
+    };
+    const chineseChapterMatch = /^第\s*([一二三四五六七八九十])\s*章$/.exec(rawChapterRef);
+    const chineseChapterNumbers: Record<string, number> = {
+      一: 1,
+      二: 2,
+      三: 3,
+      四: 4,
+      五: 5,
+      六: 6,
+      七: 7,
+      八: 8,
+      九: 9,
+      十: 10
+    };
+    const looseChapterNumber = unambiguousChapterMatch
+      ? Number(unambiguousChapterMatch[1])
+      : wordChapterMatch
+        ? wordChapterNumbers[wordChapterMatch[1].toLocaleLowerCase()]
+        : chineseChapterMatch
+          ? chineseChapterNumbers[chineseChapterMatch[1]]
+          : null;
+    const chapterRef = looseChapterNumber
+      ? `ch${String(looseChapterNumber).padStart(2, "0")}`
+      : rawChapterRef;
 
     return {
       id: existingId || randomUUID(),
       label: asString(record.label, `Beat ${index + 1}`),
       summary: asString(record.summary),
-      chapterRef: asString(record.chapterRef),
+      chapterRef,
       stakes: asString(record.stakes),
       notes: asString(record.notes)
     };
@@ -545,6 +606,15 @@ async function runStageWithRetry(
         break;
       }
 
+      options.onStageRetry?.({
+        stage,
+        view: getProgressView(stage),
+        message: `Retrying ${stage} (${attempt + 1}/${maxAttempts})...`,
+        project,
+        attempt: attempt + 1,
+        errorMessage: error instanceof Error ? error.message : String(error)
+      });
+
       const delayMs = Math.round(retryBaseDelayMs * Math.pow(2, attempt - 1));
       await sleep(delayMs, options.abortSignal);
     }
@@ -565,9 +635,45 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
   }
 
   let nextProject = cloneProject(options.project);
+  const stages = getStagesForScope(options.scope);
+  let taskCheckpoint: StoryTaskCheckpoint | null = null;
 
-  for (const stage of getStagesForScope(options.scope)) {
+  if (options.projectId) {
+    taskCheckpoint = options.resume && options.taskId
+      ? loadStoryTaskCheckpoint(options.cwd, options.projectId, options.taskId)
+      : null;
+    taskCheckpoint ??= createStoryTaskCheckpoint({
+      cwd: options.cwd,
+      projectId: options.projectId,
+      kind: options.scope === "all" ? "story-bootstrap" : "story-refresh",
+      scope: options.scope,
+      stages,
+      taskId: options.taskId
+    });
+    taskCheckpoint = saveStoryTaskCheckpoint(options.cwd, {
+      ...taskCheckpoint,
+      status: "running",
+      errorMessage: null
+    });
+    options.onCheckpoint?.(taskCheckpoint);
+  }
+
+  for (const [stageOffset, stage] of stages.entries()) {
     throwIfAborted(options.abortSignal);
+
+    if (taskCheckpoint?.completedStages.includes(stage)) {
+      continue;
+    }
+
+    if (taskCheckpoint) {
+      taskCheckpoint = saveStoryTaskCheckpoint(options.cwd, {
+        ...taskCheckpoint,
+        status: "running",
+        currentStage: stage,
+        stageIndex: stageOffset + 1
+      });
+      options.onCheckpoint?.(taskCheckpoint);
+    }
 
     const startProgress = {
       stage,
@@ -579,8 +685,31 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
     options.onStageStart?.(startProgress);
 
     try {
-      nextProject = await runStageWithRetry(options, nextProject, stage);
+      nextProject = await runStageWithRetry({
+        ...options,
+        onStageRetry: (progress) => {
+          if (taskCheckpoint) {
+            taskCheckpoint = saveStoryTaskCheckpoint(options.cwd, {
+              ...taskCheckpoint,
+              retryCount: taskCheckpoint.retryCount + 1,
+              errorMessage: progress.errorMessage
+            });
+            options.onCheckpoint?.(taskCheckpoint);
+          }
+          options.onStageRetry?.(progress);
+        }
+      }, nextProject, stage);
       ensureSaved(options.cwd, nextProject, options.projectId);
+      if (taskCheckpoint) {
+        taskCheckpoint = saveStoryTaskCheckpoint(options.cwd, {
+          ...taskCheckpoint,
+          completedStages: [...new Set([...taskCheckpoint.completedStages, stage])],
+          currentStage: stage,
+          stageIndex: stageOffset + 1,
+          errorMessage: null
+        });
+        options.onCheckpoint?.(taskCheckpoint);
+      }
       options.onStageComplete?.({
         stage,
         view: getProgressView(stage),
@@ -603,16 +732,87 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
         // Preserve the original failure. The app will surface the stage error.
       }
 
+      if (taskCheckpoint) {
+        taskCheckpoint = saveStoryTaskCheckpoint(options.cwd, {
+          ...taskCheckpoint,
+          status: error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed",
+          retryCount: taskCheckpoint.retryCount,
+          errorMessage: message
+        });
+        options.onCheckpoint?.(taskCheckpoint);
+      }
+
       return {
         ok: false,
         project: nextProject,
         failedStage: stage,
-        errorMessage: message
+        errorMessage: message,
+        validationReport: null,
+        taskCheckpoint
       };
     }
   }
 
-  const nextStatus = hasReadySections(nextProject) ? "ready" : nextProject.meta.status;
+  let validationReport: StoryValidationReport | null = null;
+
+  if (options.enableRepairGate !== false) {
+    try {
+      const gateResult = await runStoryValidationRepairGate(nextProject, {
+        cwd: options.cwd,
+        model: options.model,
+        runner: options.runner,
+        maxRepairRounds: options.maxRepairRounds,
+        abortSignal: options.abortSignal
+      });
+      nextProject = gateResult.project;
+      validationReport = gateResult.report;
+      if (options.projectId) {
+        writeStoryArtifactJson(
+          options.cwd,
+          options.projectId,
+          "logs",
+          "validation-report.json",
+          {
+            report: gateResult.report,
+            repairedTargets: gateResult.repairedTargets,
+            repairAttempts: gateResult.repairAttempts
+          }
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      nextProject = touchProject({
+        ...nextProject,
+        meta: {
+          ...nextProject.meta,
+          status: "partial"
+        }
+      });
+      ensureSaved(options.cwd, nextProject, options.projectId);
+      if (taskCheckpoint) {
+        taskCheckpoint = saveStoryTaskCheckpoint(options.cwd, {
+          ...taskCheckpoint,
+          status: error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed",
+          currentStage: null,
+          errorMessage: message
+        });
+        options.onCheckpoint?.(taskCheckpoint);
+      }
+      return {
+        ok: false,
+        project: nextProject,
+        failedStage: null,
+        errorMessage: `Story validation/repair gate failed: ${message}`,
+        validationReport,
+        taskCheckpoint
+      };
+    }
+  }
+
+  const validationPassed = validationReport?.passed ?? true;
+  const nextStatus = hasReadySections(nextProject) && validationPassed
+    ? "ready"
+    : "partial";
   nextProject = touchProject({
     ...nextProject,
     meta: {
@@ -621,11 +821,25 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
     }
   });
   ensureSaved(options.cwd, nextProject, options.projectId);
+  if (taskCheckpoint) {
+    taskCheckpoint = saveStoryTaskCheckpoint(options.cwd, {
+      ...taskCheckpoint,
+      status: validationPassed ? "completed" : "failed",
+      currentStage: null,
+      stageIndex: stages.length,
+      errorMessage: validationPassed ? null : "Story validation failed."
+    });
+    options.onCheckpoint?.(taskCheckpoint);
+  }
 
   return {
-    ok: true,
+    ok: validationPassed,
     project: nextProject,
     failedStage: null,
-    errorMessage: null
+    errorMessage: validationPassed
+      ? null
+      : `Story validation failed: ${validationReport?.issues.map((issue) => issue.message).join("; ")}`,
+    validationReport,
+    taskCheckpoint
   };
 }

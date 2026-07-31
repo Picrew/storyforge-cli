@@ -24,6 +24,7 @@ import {
   renderStoryChapters,
   runStoryCi
 } from "../story/simulation.js";
+import { ensureStoryArtifactDirectories } from "../story/artifact-store.js";
 import type {
   ChapterPlan,
   StoryProject
@@ -179,6 +180,11 @@ export interface StoryCompileRequest {
 export interface StoryRunProgress {
   stage: string;
   message: string;
+  stage_index?: number;
+  total_stages?: number;
+  elapsed_ms?: number;
+  retry_count?: number;
+  checkpoint_path?: string;
 }
 
 export interface StoryRunResult {
@@ -206,6 +212,7 @@ export interface StoryRunResult {
     chapter_ids: string[];
     rendered: string[];
     skipped: string[];
+    errors?: Array<{ chapterId: string; message: string }>;
   };
   compile: {
     compiled_chapters: string[];
@@ -774,6 +781,19 @@ async function runBootstrapFromPrompt(options: {
     runner: options.runner,
     scope: "all",
     abortSignal: options.abortSignal,
+    onCheckpoint: (checkpoint) => {
+      options.onProgress?.({
+        stage: checkpoint.currentStage ?? checkpoint.status,
+        message: checkpoint.currentStage
+          ? `Stage ${checkpoint.stageIndex}/${checkpoint.totalStages}: ${checkpoint.currentStage}`
+          : `Task ${checkpoint.status}.`,
+        stage_index: checkpoint.stageIndex,
+        total_stages: checkpoint.totalStages,
+        elapsed_ms: checkpoint.elapsedMs,
+        retry_count: checkpoint.retryCount,
+        checkpoint_path: checkpoint.checkpointPath
+      });
+    },
     onStageStart: ({ stage, message }) => {
       options.onProgress?.({
         stage: `bootstrap:${stage}:start`,
@@ -845,6 +865,19 @@ async function runRefresh(options: {
     runner: options.runner,
     scope: options.scope,
     abortSignal: options.abortSignal,
+    onCheckpoint: (checkpoint) => {
+      options.onProgress?.({
+        stage: checkpoint.currentStage ?? checkpoint.status,
+        message: checkpoint.currentStage
+          ? `Stage ${checkpoint.stageIndex}/${checkpoint.totalStages}: ${checkpoint.currentStage}`
+          : `Task ${checkpoint.status}.`,
+        stage_index: checkpoint.stageIndex,
+        total_stages: checkpoint.totalStages,
+        elapsed_ms: checkpoint.elapsedMs,
+        retry_count: checkpoint.retryCount,
+        checkpoint_path: checkpoint.checkpointPath
+      });
+    },
     onStageStart: ({ stage, message }) => {
       options.onProgress?.({
         stage: `refresh:${stage}:start`,
@@ -890,11 +923,13 @@ function materializeCompileOutputPath(
 
 function writeRunArtifacts(
   workspaceDir: string,
+  projectId: string,
   project: StoryProject,
   summary: Record<string, unknown>
 ): { projectPath: string; summaryPath: string } {
-  const projectPath = path.join(workspaceDir, "project.json");
-  const summaryPath = path.join(workspaceDir, "run-summary.json");
+  const artifactPaths = ensureStoryArtifactDirectories(workspaceDir, projectId);
+  const projectPath = path.join(artifactPaths.logs, "project-snapshot.json");
+  const summaryPath = path.join(artifactPaths.logs, "run-summary.json");
 
   fs.writeFileSync(projectPath, `${JSON.stringify(project, null, 2)}\n`, "utf8");
   fs.writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
@@ -1121,6 +1156,7 @@ export async function executeStoryRenderRequest(request: StoryRenderRequest): Pr
     chapterIds,
     style: asOptionalString(request.style) ?? null,
     force: request.force === true,
+    validateOutput: true,
     runner: runtime.runner,
     maxConcurrency:
       typeof request.max_concurrency === "number" && Number.isFinite(request.max_concurrency)
@@ -1162,6 +1198,12 @@ export function executeStoryCompileRequest(request: StoryCompileRequest): {
     chapterIds,
     outputPath
   });
+
+  if (!result.wroteOutput) {
+    throwValidation(
+      `No chapter files were available to compile (${result.missingChapters.join(", ") || "none requested"}).`
+    );
+  }
 
   return {
     workspace_dir: context.workspaceDir,
@@ -1333,6 +1375,7 @@ export async function executeStoryRunRequest(
     chapterIds: renderChapterIds,
     style: asOptionalString(request.render?.style) ?? null,
     force: request.render?.force === false ? false : true,
+    validateOutput: true,
     runner: countedRunner,
     abortSignal: runSignal,
     maxConcurrency:
@@ -1349,6 +1392,14 @@ export async function executeStoryRunRequest(
     },
     renderResult.project
   );
+
+  if (renderResult.errors.length > 0) {
+    throwInternal(
+      `Render validation failed: ${renderResult.errors
+        .map((entry) => `${entry.chapterId}: ${entry.message}`)
+        .join("; ")}`
+    );
+  }
 
   const compileChapterIds = resolveChapterIds(
     project,
@@ -1370,6 +1421,9 @@ export async function executeStoryRunRequest(
     chapterIds: compileChapterIds,
     outputPath: manuscriptPath
   });
+  if (!compileResult.wroteOutput) {
+    throwInternal("Compile produced no manuscript because every requested chapter was missing.");
+  }
   const elapsedMs = Math.max(0, Date.now() - runStartedAt);
 
   const summary = {
@@ -1393,7 +1447,8 @@ export async function executeStoryRunRequest(
     render: {
       chapter_ids: renderChapterIds,
       rendered: renderResult.rendered,
-      skipped: renderResult.skipped
+      skipped: renderResult.skipped,
+      errors: renderResult.errors
     },
     compile: {
       compiled_chapters: compileResult.compiledChapters,
@@ -1401,7 +1456,7 @@ export async function executeStoryRunRequest(
       output_path: compileResult.outputPath
     }
   };
-  const artifacts = writeRunArtifacts(workspaceDir, project, summary);
+  const artifacts = writeRunArtifacts(workspaceDir, createResult.projectId, project, summary);
 
   onProgress?.({
     stage: "done",

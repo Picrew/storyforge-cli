@@ -578,6 +578,7 @@ export function handleStoryCommand(
           "Core: /connect, /models, /status, /projects",
           "Story: /init, /world, /char, /timeline, /outline",
           "Pipeline: /commit, /ci, /render, /compile",
+          "Recovery: /cancel, /retry, /resume",
           "Use quoted paths when they contain spaces, e.g. /init --dir \"My Story\"."
         ].join("\n")
       };
