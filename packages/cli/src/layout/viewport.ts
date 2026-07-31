@@ -4,7 +4,7 @@ const HERO_BREAKPOINT = 100;
 const COMPACT_BREAKPOINT = 74;
 const WELCOME_CONDENSE_BREAKPOINT = 84;
 const MAX_CONTENT_WIDTH = 110;
-const MIN_CONTENT_WIDTH = 32;
+const MIN_CONTENT_WIDTH = 20;
 
 export function resolveViewportMode(width: number): ViewportMode {
   if (width >= HERO_BREAKPOINT) {
@@ -31,4 +31,3 @@ export function shouldCondenseWelcome(width: number): boolean {
 export function shouldUseCompactFooter(width: number): boolean {
   return width < COMPACT_BREAKPOINT;
 }
-

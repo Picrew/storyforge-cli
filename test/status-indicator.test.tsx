@@ -86,7 +86,7 @@ describe("Status indicator", () => {
     app.unmount();
   });
 
-  it("shows preview mode in footer when idle", () => {
+  it("shows ready state in footer when idle", () => {
     const state = {
       ...createInitialAppState(100),
       transcript: [makeEntry({ id: "t5", response: "Done" })],
@@ -98,7 +98,7 @@ describe("Status indicator", () => {
     );
     const frame = app.lastFrame()!;
 
-    expect(frame).toContain("preview mode");
+    expect(frame).toContain("ready");
     app.unmount();
   });
 });

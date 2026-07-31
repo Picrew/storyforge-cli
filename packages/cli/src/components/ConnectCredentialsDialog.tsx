@@ -11,12 +11,14 @@ interface ConnectCredentialsDialogProps {
 }
 
 function renderField(label: string, value: string): React.JSX.Element {
+  const maskedValue = value ? "•".repeat(Math.min(value.length, 32)) : "_";
+
   return (
     <Box>
       <Text color={themeTokens.accent}>{label.padEnd(8, " ")}</Text>
       <Text color={themeTokens.textSecondary}> </Text>
       <Text color="black" backgroundColor={themeTokens.accentSecondary}>
-        {value || "_"}
+        {maskedValue}
       </Text>
     </Box>
   );

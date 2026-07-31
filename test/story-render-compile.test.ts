@@ -178,6 +178,9 @@ describe("story render and compile", () => {
     expect(result.wroteOutput).toBe(true);
     expect(fs.readFileSync(migratedChapterPath, "utf8")).toContain("Legacy project prose");
     expect(fs.existsSync(markerPath)).toBe(true);
+    expect(project.chapterRenders[0].file).toBe(
+      "artifacts/migrated-project/chapters/ch01.md"
+    );
     expect(fs.existsSync(legacyChapterPath)).toBe(true);
     expect(fs.existsSync(path.join(
       cwd,
@@ -195,6 +198,36 @@ describe("story render and compile", () => {
       "cache",
       "legacy.json"
     ))).toBe(true);
+  });
+
+  it("does not finalize migration when no legacy source exists", () => {
+    const cwd = makeTempDir();
+    const project = createProjectForRender();
+    project.chapterRenders.push({
+      chapterId: "ch01",
+      file: "chapters/ch01.md",
+      renderedAt: "2026-03-12T00:00:00.000Z",
+      model: "deepseek/deepseek-chat",
+      commitIds: ["commit-1"],
+      dirty: false
+    });
+
+    compileStoryChapters({
+      cwd,
+      projectId: "missing-legacy",
+      project,
+      chapterIds: ["ch01"],
+      outputPath: null
+    });
+
+    expect(fs.existsSync(path.join(
+      cwd,
+      ".storyforge",
+      "artifacts",
+      "missing-legacy",
+      "cache",
+      "artifact-migration-v1.json"
+    ))).toBe(false);
   });
 
   it("renders dirty chapters to markdown files and updates metadata", async () => {

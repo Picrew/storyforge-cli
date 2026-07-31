@@ -31,8 +31,10 @@ export function WelcomeCard({ width, condensed }: WelcomeCardProps): React.JSX.E
       <Text color={themeTokens.border}>{divider}</Text>
       {body.map((line, index) => (
         <Box key={line}>
-          <Text color={themeTokens.accent}>{`${String(index + 1).padStart(2, "0")}`}</Text>
-          <Text color={themeTokens.accentSecondary}> | </Text>
+          <Text color={themeTokens.accent}>
+            {width < 40 ? "•" : String(index + 1).padStart(2, "0")}
+          </Text>
+          <Text color={themeTokens.accentSecondary}>{width < 40 ? " " : " | "}</Text>
           <Text color={themeTokens.textPrimary}>{line}</Text>
         </Box>
       ))}

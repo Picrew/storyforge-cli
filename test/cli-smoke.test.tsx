@@ -24,7 +24,7 @@ describe("CLI smoke test", () => {
       />
     );
 
-    expect(app.lastFrame()).toContain("STORYFORGE // preview build");
+    expect(app.lastFrame()).toContain("STORYFORGE // v0.1.4");
     expect(app.lastFrame()).toContain("Describe a premise, scene, or character...");
     expect(app.lastFrame()).toContain("run /connect");
     app.unmount();

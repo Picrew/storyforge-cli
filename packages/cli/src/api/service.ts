@@ -54,6 +54,29 @@ function resolveDefaultApiOutputRoot(): string {
 export const DEFAULT_API_OUTPUT_ROOT = resolveDefaultApiOutputRoot();
 
 const DEFAULT_MODEL_TIMEOUT_MS = 180_000;
+const projectMutationTails = new Map<string, Promise<void>>();
+
+async function withProjectMutationLock<T>(
+  key: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previous = projectMutationTails.get(key) ?? Promise.resolve();
+  let release = (): void => {};
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  projectMutationTails.set(key, current);
+  await previous;
+
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (projectMutationTails.get(key) === current) {
+      projectMutationTails.delete(key);
+    }
+  }
+}
 
 export class ApiServiceError extends Error {
   code: number;
@@ -1144,40 +1167,45 @@ export async function executeStoryRenderRequest(request: StoryRenderRequest): Pr
   skipped: string[];
   errors: Array<{ chapter_id: string; message: string }>;
 }> {
-  const context = loadWorkspaceProject(request.workspace_dir, request.project_id);
-  const chapterIds = resolveChapterIds(context.project, request.chapter_range, request.chapter_ids);
-  const runtime = resolveModelRuntime(request.model_config);
+  const initialContext = loadWorkspaceProject(request.workspace_dir, request.project_id);
+  const lockKey = `${initialContext.workspaceDir}\0${initialContext.projectId}`;
 
-  const result = await renderStoryChapters({
-    cwd: context.workspaceDir,
-    projectId: context.projectId,
-    model: runtime.model,
-    project: context.project,
-    chapterIds,
-    style: asOptionalString(request.style) ?? null,
-    force: request.force === true,
-    validateOutput: true,
-    runner: runtime.runner,
-    maxConcurrency:
-      typeof request.max_concurrency === "number" && Number.isFinite(request.max_concurrency)
-        ? Math.max(1, Math.floor(request.max_concurrency))
-        : 1
+  return withProjectMutationLock(lockKey, async () => {
+    const context = loadWorkspaceProject(request.workspace_dir, request.project_id);
+    const chapterIds = resolveChapterIds(context.project, request.chapter_range, request.chapter_ids);
+    const runtime = resolveModelRuntime(request.model_config);
+
+    const result = await renderStoryChapters({
+      cwd: context.workspaceDir,
+      projectId: context.projectId,
+      model: runtime.model,
+      project: context.project,
+      chapterIds,
+      style: asOptionalString(request.style) ?? null,
+      force: request.force === true,
+      validateOutput: true,
+      runner: runtime.runner,
+      maxConcurrency:
+        typeof request.max_concurrency === "number" && Number.isFinite(request.max_concurrency)
+          ? Math.max(1, Math.floor(request.max_concurrency))
+          : 1
+    });
+
+    persistProject(context, result.project);
+
+    return {
+      workspace_dir: context.workspaceDir,
+      project_id: context.projectId,
+      project: result.project,
+      chapter_ids: chapterIds,
+      rendered: result.rendered,
+      skipped: result.skipped,
+      errors: result.errors.map((entry) => ({
+        chapter_id: entry.chapterId,
+        message: entry.message
+      }))
+    };
   });
-
-  persistProject(context, result.project);
-
-  return {
-    workspace_dir: context.workspaceDir,
-    project_id: context.projectId,
-    project: result.project,
-    chapter_ids: chapterIds,
-    rendered: result.rendered,
-    skipped: result.skipped,
-    errors: result.errors.map((entry) => ({
-      chapter_id: entry.chapterId,
-      message: entry.message
-    }))
-  };
 }
 
 export function executeStoryCompileRequest(request: StoryCompileRequest): {

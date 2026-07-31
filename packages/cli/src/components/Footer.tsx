@@ -21,7 +21,8 @@ function formatTaskLabel(task: PendingTask): string {
     "story-commit": "commit",
     "story-ci": "ci",
     "story-render": "render",
-    "story-compile": "compile"
+    "story-compile": "compile",
+    "story-validate": "validate"
   };
   return kindLabels[task.kind] ?? task.kind;
 }

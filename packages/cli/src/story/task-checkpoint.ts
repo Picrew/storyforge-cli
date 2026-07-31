@@ -40,6 +40,77 @@ function getTasksDirectory(cwd: string, projectId: string): string {
   return path.join(ensureStoryArtifactDirectories(cwd, projectId).cache, "tasks");
 }
 
+const CHECKPOINT_STATUSES = new Set<StoryTaskCheckpointStatus>([
+  "pending",
+  "running",
+  "failed",
+  "cancelled",
+  "completed"
+]);
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function parseCheckpoint(
+  value: unknown,
+  expectedProjectId: string,
+  checkpointPath: string
+): StoryTaskCheckpoint {
+  if (!value || typeof value !== "object") {
+    throw new Error("checkpoint root must be an object");
+  }
+  const record = value as Record<string, unknown>;
+  const validDate = (entry: unknown): entry is string =>
+    typeof entry === "string" && Number.isFinite(Date.parse(entry));
+  const validNumber = (entry: unknown): entry is number =>
+    typeof entry === "number" && Number.isFinite(entry) && entry >= 0;
+
+  if (
+    record.version !== 1 ||
+    typeof record.id !== "string" ||
+    record.projectId !== expectedProjectId ||
+    typeof record.kind !== "string" ||
+    typeof record.scope !== "string" ||
+    typeof record.status !== "string" ||
+    !CHECKPOINT_STATUSES.has(record.status as StoryTaskCheckpointStatus) ||
+    !isStringArray(record.stages) ||
+    !isStringArray(record.completedStages) ||
+    !(record.currentStage === null || typeof record.currentStage === "string") ||
+    !validNumber(record.stageIndex) ||
+    !validNumber(record.totalStages) ||
+    !validNumber(record.retryCount) ||
+    !validDate(record.startedAt) ||
+    !validDate(record.updatedAt) ||
+    !validNumber(record.elapsedMs) ||
+    !(record.errorMessage === null || typeof record.errorMessage === "string")
+  ) {
+    throw new Error("checkpoint schema or project ownership is invalid");
+  }
+
+  const stages = record.stages;
+  const completedStages = record.completedStages;
+  if (
+    record.totalStages !== stages.length ||
+    record.stageIndex > record.totalStages ||
+    completedStages.some((stage) => !stages.includes(stage)) ||
+    (typeof record.currentStage === "string" && !stages.includes(record.currentStage))
+  ) {
+    throw new Error("checkpoint stage progress is inconsistent");
+  }
+
+  return {
+    ...(record as unknown as StoryTaskCheckpoint),
+    checkpointPath
+  };
+}
+
+function quarantineCheckpoint(checkpointPath: string): string {
+  const quarantinePath = `${checkpointPath}.corrupt-${Date.now()}`;
+  fs.renameSync(checkpointPath, quarantinePath);
+  return quarantinePath;
+}
+
 export function getStoryTaskCheckpointPath(
   cwd: string,
   projectId: string,
@@ -112,11 +183,17 @@ export function loadStoryTaskCheckpoint(
   if (!fs.existsSync(checkpointPath)) {
     return null;
   }
-  const value = JSON.parse(fs.readFileSync(checkpointPath, "utf8")) as StoryTaskCheckpoint;
-  return {
-    ...value,
-    checkpointPath
-  };
+  try {
+    const value = JSON.parse(fs.readFileSync(checkpointPath, "utf8")) as unknown;
+    return parseCheckpoint(value, projectId, checkpointPath);
+  } catch (error) {
+    const quarantinePath = quarantineCheckpoint(checkpointPath);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Invalid story task checkpoint was quarantined at ${quarantinePath}: ${message}`,
+      { cause: error }
+    );
+  }
 }
 
 export function findLatestStoryTaskCheckpoint(
@@ -138,16 +215,10 @@ function listStoryTaskCheckpoints(
   }
   return fs.readdirSync(tasksDirectory)
     .filter((entry) => entry.endsWith(".json") && !entry.endsWith(".tmp"))
-    .map((entry) => {
-      try {
-        return JSON.parse(
-          fs.readFileSync(path.join(tasksDirectory, entry), "utf8")
-        ) as StoryTaskCheckpoint;
-      } catch {
-        return null;
-      }
-    })
-    .filter((entry): entry is StoryTaskCheckpoint => Boolean(entry))
+    .map((entry) =>
+      loadStoryTaskCheckpoint(cwd, projectId, entry.slice(0, -".json".length))
+    )
+    .filter((entry): entry is StoryTaskCheckpoint => entry !== null)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 

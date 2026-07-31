@@ -433,9 +433,10 @@ function normalizeTimeline(project: StoryProject, payload: TimelinePayload | Tim
     const record = entry as Record<string, unknown>;
     const existingId = project.timeline[index]?.id;
     const rawChapterRef = asString(record.chapterRef);
-    const unambiguousChapterMatch = /^(?:chapter\s*|ch\s*|第\s*)?0*([1-9]\d*)\s*(?:章)?$/i.exec(
-      rawChapterRef
-    );
+    const unambiguousChapterMatch =
+      /^(?:chapter\s*|ch\s*|第\s*)?0*([1-9]\d*)\s*(?:章)?(?:\s*[(（][^()（）]{1,40}[)）])?$/i.exec(
+        rawChapterRef.trim()
+      );
     const wordChapterMatch = /^(?:chapter|ch)\s*(one|two|three|four|five|six|seven|eight|nine|ten)$/i.exec(
       rawChapterRef
     );
@@ -659,8 +660,6 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
   }
 
   for (const [stageOffset, stage] of stages.entries()) {
-    throwIfAborted(options.abortSignal);
-
     if (taskCheckpoint?.completedStages.includes(stage)) {
       continue;
     }
@@ -685,6 +684,7 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
     options.onStageStart?.(startProgress);
 
     try {
+      throwIfAborted(options.abortSignal);
       nextProject = await runStageWithRetry({
         ...options,
         onStageRetry: (progress) => {
@@ -757,12 +757,19 @@ export async function runStoryTask(options: StoryTaskOptions): Promise<StoryTask
 
   if (options.enableRepairGate !== false) {
     try {
+      throwIfAborted(options.abortSignal);
       const gateResult = await runStoryValidationRepairGate(nextProject, {
         cwd: options.cwd,
         model: options.model,
         runner: options.runner,
         maxRepairRounds: options.maxRepairRounds,
-        abortSignal: options.abortSignal
+        abortSignal: options.abortSignal,
+        onTargetRepaired: ({ project }) => {
+          // Persist every independently repaired target. If a later target
+          // fails, resume starts from the last known-good project.
+          nextProject = project;
+          ensureSaved(options.cwd, nextProject, options.projectId);
+        }
       });
       nextProject = gateResult.project;
       validationReport = gateResult.report;

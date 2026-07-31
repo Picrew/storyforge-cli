@@ -19,6 +19,8 @@ export interface StoryArtifactMigrationReport {
   migrated: boolean;
   copiedFiles: string[];
   markerPath: string;
+  conflicts: string[];
+  warnings: string[];
 }
 
 export function normalizeArtifactProjectId(projectId?: string | null): string {
@@ -106,6 +108,50 @@ function copyDirectoryContents(
   }
 }
 
+function findOtherLegacyOwners(
+  cwd: string,
+  currentProjectId: string,
+  chapterId: string,
+  source: string
+): string[] {
+  const workspacePath = path.join(cwd, STORY_ROOT_DIR, "workspace.json");
+  if (!fs.existsSync(workspacePath)) {
+    return [];
+  }
+
+  try {
+    const workspace = JSON.parse(fs.readFileSync(workspacePath, "utf8")) as {
+      projects?: Array<{ id?: unknown; file?: unknown }>;
+    };
+    return (workspace.projects ?? []).flatMap((entry) => {
+      if (
+        typeof entry.id !== "string" ||
+        entry.id === currentProjectId ||
+        typeof entry.file !== "string"
+      ) {
+        return [];
+      }
+      const projectPath = path.resolve(cwd, STORY_ROOT_DIR, entry.file);
+      const storyRoot = path.resolve(cwd, STORY_ROOT_DIR);
+      if (!projectPath.startsWith(`${storyRoot}${path.sep}`) || !fs.existsSync(projectPath)) {
+        return [];
+      }
+      const candidate = JSON.parse(fs.readFileSync(projectPath, "utf8")) as {
+        chapterRenders?: Array<{ chapterId?: unknown; file?: unknown }>;
+      };
+      const sharesSource = (candidate.chapterRenders ?? []).some((render) => {
+        if (render.chapterId !== chapterId || typeof render.file !== "string") {
+          return false;
+        }
+        return resolveLegacyArtifactPath(cwd, render.file) === source;
+      });
+      return sharesSource ? [entry.id] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
 export function migrateLegacyStoryArtifacts(
   cwd: string,
   projectId: string,
@@ -118,11 +164,15 @@ export function migrateLegacyStoryArtifacts(
     return {
       migrated: false,
       copiedFiles: [],
-      markerPath
+      markerPath,
+      conflicts: [],
+      warnings: []
     };
   }
 
   const copiedFiles: string[] = [];
+  const conflicts: string[] = [];
+  const warnings: string[] = [];
   const legacyChapters = path.join(cwd, STORY_ROOT_DIR, "chapters");
   const chapterSources = new Map<string, string>();
 
@@ -150,7 +200,56 @@ export function migrateLegacyStoryArtifacts(
   }
 
   for (const [chapterId, source] of chapterSources) {
+    if (!fs.existsSync(source) || !fs.statSync(source).isFile()) {
+      warnings.push(`No legacy artifact was found for ${chapterId}.`);
+      continue;
+    }
+    const otherOwners = findOtherLegacyOwners(cwd, projectId, chapterId, source);
+    if (otherOwners.length > 0) {
+      conflicts.push(
+        `${chapterId} is also referenced by project(s): ${otherOwners.join(", ")}`
+      );
+      continue;
+    }
     copyFileIfMissing(source, path.join(paths.chapters, `${chapterId}.md`), copiedFiles);
+    const render = project.chapterRenders.find((entry) => entry.chapterId === chapterId);
+    if (render) {
+      render.file = path.relative(
+        path.join(cwd, STORY_ROOT_DIR),
+        path.join(paths.chapters, `${chapterId}.md`)
+      );
+    }
+  }
+
+  if (conflicts.length > 0) {
+    const conflictPath = path.join(paths.logs, "artifact-migration-conflicts.json");
+    fs.writeFileSync(conflictPath, `${JSON.stringify({
+      version: 1,
+      projectId,
+      detectedAt: new Date().toISOString(),
+      conflicts,
+      warnings
+    }, null, 2)}\n`, "utf8");
+    return {
+      migrated: false,
+      copiedFiles,
+      markerPath,
+      conflicts,
+      warnings
+    };
+  }
+
+  const hasLegacySource = [...chapterSources.values()].some(
+    (source) => fs.existsSync(source) && fs.statSync(source).isFile()
+  );
+  if (!hasLegacySource) {
+    return {
+      migrated: false,
+      copiedFiles: [],
+      markerPath,
+      conflicts,
+      warnings
+    };
   }
 
   if (copiedFiles.length > 0) {
@@ -182,7 +281,9 @@ export function migrateLegacyStoryArtifacts(
   return {
     migrated: copiedFiles.length > 0,
     copiedFiles,
-    markerPath
+    markerPath,
+    conflicts,
+    warnings
   };
 }
 

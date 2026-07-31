@@ -15,6 +15,7 @@ export type StoryRepairTarget =
   | "characters"
   | "timeline"
   | "outline"
+  | "eventCommits"
   | "foreshadows"
   | `chapter:${string}`;
 
@@ -44,6 +45,12 @@ export interface StoryRepairGateOptions extends StoryValidationOptions {
   runner: StructuredRunner;
   maxRepairRounds?: number;
   abortSignal?: AbortSignal;
+  onTargetRepaired?: (progress: {
+    project: StoryProject;
+    target: Exclude<StoryRepairTarget, `chapter:${string}`>;
+    repairedTargets: StoryRepairTarget[];
+    repairAttempts: number;
+  }) => void;
 }
 
 export interface StoryRepairGateResult {
@@ -182,7 +189,7 @@ export function validateStoryProject(
     if (!chapterId || !outlineChapterIds.has(chapterId)) {
       add(
         "chapter_attribution",
-        "timeline",
+        "eventCommits",
         "commit_chapter_ref",
         `Commit '${commit.id}' points to unknown chapter '${commit.chapterId}'.`
       );
@@ -197,7 +204,7 @@ export function validateStoryProject(
       if (ref !== chapterId) {
         add(
           "chapter_attribution",
-          "timeline",
+          "eventCommits",
           "commit_patch_chapter_ref",
           `Commit '${commit.id}' contains a timeline beat assigned outside ${commit.chapterId}.`,
           chapterId ?? undefined
@@ -214,12 +221,15 @@ export function validateStoryProject(
       }
       const field = String(op.payload.field ?? "").trim();
       const value = normalizeFact(op.payload.value);
-      const key = `${commit.chapterId}:${field}`;
+      // Separate commits are an ordered event log and may intentionally update
+      // the same world field. Only contradictory writes inside one commit are
+      // structurally ambiguous.
+      const key = `${commit.id}:${field}`;
       const prior = worldWrites.get(key);
       if (field && prior && prior !== value) {
         add(
           "fact_conflict",
-          "foundation",
+          "eventCommits",
           "world_write_conflict",
           `Chapter ${commit.chapterId} assigns conflicting values to world.${field}.`,
           commit.chapterId
@@ -403,6 +413,12 @@ export async function runStoryValidationRepairGate(
       nextProject = applyRepairPayload(nextProject, target, payload);
       repairedTargets.push(target);
       repairAttempts += 1;
+      options.onTargetRepaired?.({
+        project: nextProject,
+        target,
+        repairedTargets: [...repairedTargets],
+        repairAttempts
+      });
     }
 
     report = validateStoryProject(nextProject, { ...options, chapterTexts });

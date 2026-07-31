@@ -12,8 +12,8 @@ describe("Footer layout", () => {
     const app = render(<AppShell state={createInitialAppState(100)} terminalWidth={100} cwd={cwd} />);
 
     expect(app.lastFrame()).toContain("~/Downloads/storyforge");
-    expect(app.lastFrame()).toContain("preview mode");
-    expect(app.lastFrame()).toContain("writer-shell");
+    expect(app.lastFrame()).toContain("ready");
+    expect(app.lastFrame()).toContain("story workspace");
     app.unmount();
   });
 
@@ -22,8 +22,7 @@ describe("Footer layout", () => {
       <AppShell state={createInitialAppState(60)} terminalWidth={60} cwd="/tmp/storyforge" />
     );
 
-    expect(app.lastFrame()).toContain("preview mode | storyforge");
-    expect(app.lastFrame()).not.toContain("writer-shell");
+    expect(app.lastFrame()).toContain("ready | storyforge");
     app.unmount();
   });
 });

@@ -12,6 +12,7 @@ export interface CommandPreviewItem {
     | "ci"
     | "render"
     | "compile"
+    | "validate"
     | "world"
     | "characters"
     | "timeline"
@@ -77,6 +78,11 @@ const commandPreviewItems: readonly CommandPreviewItem[] = [
     command: "/compile",
     description: "Compile rendered chapters into manuscript",
     action: "compile"
+  },
+  {
+    command: "/validate",
+    description: "Check story structure and repair failed sections",
+    action: "validate"
   },
   {
     command: "/world",
